@@ -47,6 +47,21 @@ void ReportClipRestoreFailedOnce() {
               "of the wrong width. The camera is unaffected.");
 }
 
+// The other half of the pair above, and the reason it exists: the bias is what MOVES the
+// dot, and a bias that did not land leaves it at the middle of the screen while the head
+// is turned away from where the game is pointing - which is indistinguishable, from the
+// player's side, from a crosshair hook that never engaged. Without this the only line
+// about the mark would be the "Crosshair moved" one, claiming a move that did not happen.
+void ReportClipBiasFailedOnce() {
+    static bool reported = false;
+    if (!ClaimOnce(reported)) {
+        return;
+    }
+    Log::Line("WARN: the canvas the crosshair is drawn on could not be biased, so the "
+              "game's own dot is being drawn at the middle of the screen rather than "
+              "where the game is pointing. The camera is unaffected.");
+}
+
 // The one place the mod writes to a game-owned object outside the camera's own
 // out-parameters, so it says exactly what it writes and puts it back.
 //
@@ -60,11 +75,19 @@ class ClipBias {
 public:
     ClipBias(std::uintptr_t canvas, float clipX, float clipY, float dx, float dy)
         : m_canvas(canvas), m_clipX(clipX), m_clipY(clipY) {
-        cameraunlock::memory::SafeWrite(m_canvas + g_targets.offCanvasClipX,
-                                        clipX + 2.0f * dx);
-        cameraunlock::memory::SafeWrite(m_canvas + g_targets.offCanvasClipY,
-                                        clipY + 2.0f * dy);
+        // Both attempted rather than short-circuited, and each result kept: the
+        // destructor has to put back exactly the fields that were changed, and the
+        // caller has to know whether the dot is going to move at all.
+        m_wroteX = cameraunlock::memory::SafeWrite(
+            m_canvas + g_targets.offCanvasClipX, clipX + 2.0f * dx);
+        m_wroteY = cameraunlock::memory::SafeWrite(
+            m_canvas + g_targets.offCanvasClipY, clipY + 2.0f * dy);
     }
+
+    // Whether the pair the wrapped call halves was actually changed. The dot only moves
+    // when it was, so this is what the "Crosshair moved" line has to be gated on.
+    bool Applied() const { return m_wroteX && m_wroteY; }
+
     // Restored on every path out, including one the wrapped call leaves by unwinding. A
     // canvas left biased is every later element on the HUD - subtitles, the battery meter,
     // the pause overlay - laid out against a screen up to a head-turn wider or narrower
@@ -74,10 +97,14 @@ public:
     // earlier, so it failing means the canvas was freed or reprotected underneath the
     // draw, and the HUD the player is looking at is now laid out wrong with nothing else
     // to say so.
+    //
+    // Only the fields the constructor actually changed, so a canvas that refused the
+    // bias is reported once, by the line for that, rather than twice - the second of
+    // them saying the HUD is laid out against the wrong width when it was never touched.
     ~ClipBias() {
-        const bool restoredX =
+        const bool restoredX = !m_wroteX ||
             cameraunlock::memory::SafeWrite(m_canvas + g_targets.offCanvasClipX, m_clipX);
-        const bool restoredY =
+        const bool restoredY = !m_wroteY ||
             cameraunlock::memory::SafeWrite(m_canvas + g_targets.offCanvasClipY, m_clipY);
         if (!restoredX || !restoredY) {
             ReportClipRestoreFailedOnce();
@@ -91,6 +118,8 @@ private:
     std::uintptr_t m_canvas;
     float m_clipX;
     float m_clipY;
+    bool  m_wroteX = false;
+    bool  m_wroteY = false;
 };
 
 void Detour(void* hud) {
@@ -133,11 +162,17 @@ void Detour(void* hud) {
     const float dx = offset.ndc_x.load(std::memory_order_relaxed) * 0.5f * clipX;
     const float dy = -offset.ndc_y.load(std::memory_order_relaxed) * 0.5f * clipY;
 
+    bool moved = false;
     {
         const ClipBias bias(canvas, clipX, clipY, dx, dy);
+        moved = bias.Applied();
         g_original(hud);
     }
-    ReportMovedOnce(clipX, clipY, dx, dy);
+    if (moved) {
+        ReportMovedOnce(clipX, clipY, dx, dy);
+    } else {
+        ReportClipBiasFailedOnce();
+    }
 }
 
 }  // namespace

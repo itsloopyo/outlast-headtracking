@@ -246,6 +246,18 @@ void TestTheLimitsSurviveTheScaling() {
     rotationOnly.pos_x = 5.0f;
     Check(ClampedToLimits(rotationOnly, limits).pos_x == 5.0f,
           "a sample carrying no position is passed through untouched");
+
+    // The camera hook asks TrackingRuntime for the limits only on a frame whose scaled
+    // sample carries a lean, because that flag is also what proves the configuration
+    // those limits come from has been published to the render thread. The scaling must
+    // therefore never invent it - on any branch, including the pass-throughs.
+    FrameSample noLean;
+    noLean.has_rotation = true;
+    noLean.yaw = 10.0f;
+    for (const float zoom : { 1.0f, 0.25f, 4.0f, 0.0f, std::nanf("") }) {
+        Check(!ScaledForZoom(noLean, zoom).has_position,
+              "a sample with no lean never gains one through the zoom scaling");
+    }
 }
 
 void TestTheFactorIsPublished() {

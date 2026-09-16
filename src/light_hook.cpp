@@ -50,6 +50,18 @@ bool IsCarriedByThePlayer(std::uintptr_t light, const UE3Vector& eye) {
            kEyeRadiusSquared;
 }
 
+// The rotator is the game's own property - script reads it and a save serialises it - so
+// it may only carry the head across the one call that consumes it. A restore that did not
+// land leaves it holding a head-turned angle for as long as the component lives, with
+// nothing else in the session to say so.
+void ReportRotationRestoreFailedOnce() {
+    static bool reported = false;
+    if (!ClaimOnce(reported)) return;
+    Log::Line("WARN: the camcorder light's own rotator could not be put back after the "
+              "frame that borrowed it, so the game's copy of it is left carrying a head "
+              "turn. The camera is unaffected.");
+}
+
 void ReportEngagedOnce(const UE3Rotator& before, const UE3Rotator& after) {
     static bool reported = false;
     if (!ClaimOnce(reported)) return;
@@ -96,11 +108,18 @@ void Detour(void* lightComponent) {
     // carries the head only across the call that consumes it. What keeps the head
     // rotation afterwards is the transform the call computed, which is the renderer's.
     if (!cameraunlock::memory::SafeWrite(light + g_targets.offRotation, turned)) {
+        // Put the game's own rotator back before the call consumes it. A rotator is three
+        // int32s, and SafeWrite reports a fault having already copied whatever fitted
+        // before it - so a failure here can leave the field half written, which is an
+        // angle neither side asked for rather than nothing having happened.
+        cameraunlock::memory::SafeWrite(light + g_targets.offRotation, lightRotation);
         g_original(lightComponent);
         return;
     }
     g_original(lightComponent);
-    cameraunlock::memory::SafeWrite(light + g_targets.offRotation, lightRotation);
+    if (!cameraunlock::memory::SafeWrite(light + g_targets.offRotation, lightRotation)) {
+        ReportRotationRestoreFailedOnce();
+    }
     ReportEngagedOnce(lightRotation, turned);
 }
 

@@ -281,10 +281,20 @@ void Detour(void* controller, UE3Vector* outLocation, UE3Rotator* outRotation) {
     // Sequenced rather than nested: as two arguments of one call the order they run in is
     // unspecified, and GetPositionLimits must not be the one that runs first - SampleFrame
     // carries the acquire that makes the configuration visible to this thread at all.
+    //
+    // And asked for only on a frame that has a lean to clamp. Taking the acquire is not
+    // the same as the acquire having observed anything: the detours are enabled before
+    // TrackingRuntime::Start() runs, so for the first frames of a session this thread can
+    // be here while Start() is still assigning m_cfg, and the limits would be read out of
+    // a plain struct another thread is writing. has_position is what closes that - it can
+    // only be true on a frame whose acquire observed the release Start() ends on, which is
+    // what publishes m_cfg - and ClampedToLimits already passes a sample with no position
+    // through untouched, so the frames this now skips are the frames it did nothing on.
     const FrameSample raw = g_tracking->SampleFrame();
-    const PositionLimits limits = g_tracking->GetPositionLimits();
-    const FrameSample sample = ClampedToLimits(ScaledForZoom(raw, FrameZoomFactor()),
-                                               limits);
+    FrameSample sample = ScaledForZoom(raw, FrameZoomFactor());
+    if (sample.has_position) {
+        sample = ClampedToLimits(sample, g_tracking->GetPositionLimits());
+    }
     const UE3Vector cleanLocation = *outLocation;
     const UE3Rotator clean = *outRotation;
     Lean lean;
@@ -348,9 +358,14 @@ bool InstallCameraHook(const CameraHookTargets& targets, TrackingRuntime& tracki
     const MH_STATUS st = CreateAndEnableHook(target, reinterpret_cast<void*>(&Detour),
                                              reinterpret_cast<void**>(&g_original));
     if (st != MH_OK) {
+        // Deliberately does NOT say the game is otherwise untouched. By the time this
+        // runs the field-of-view hook is already in, so a configured [View] FieldOfView
+        // is still changing the angle every frame is drawn at - and a player reading a
+        // line that said otherwise would go looking for the cause somewhere else.
         Log::Line("ERROR: hooking APlayerController::GetPlayerViewPoint @ 0x%p failed: "
-                  "%d. There is no head tracking this session; the game is otherwise "
-                  "untouched.", target, st);
+                  "%d. There is no head tracking this session, and no crosshair or "
+                  "camcorder-light hook either. A configured [View] FieldOfView still "
+                  "applies.", target, st);
         g_original = nullptr;
         g_tracking = nullptr;
         return false;

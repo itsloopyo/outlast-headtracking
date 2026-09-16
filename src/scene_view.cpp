@@ -160,20 +160,21 @@ void* Detour(void* thisptr, void* family, void* outLocation, void* outRotation,
     // it. What it costs until then is one scan per drawn frame.
     if (g_projectionOffset < 0) {
         ScanForProjection(view);
-        if (g_projectionOffset < 0) {
-            return view;
-        }
     }
 
     // The offset was proven on one FSceneView and every frame builds a new one, so the
     // read is guarded here too rather than only during the scan.
     ProjectionMatrix matrix;
-    if (!ReadProjectionAt(view, g_projectionOffset, matrix)) {
-        GetFrameProjection().valid.store(false, std::memory_order_relaxed);
-        return view;
+    if (g_projectionOffset >= 0 && ReadProjectionAt(view, g_projectionOffset, matrix)) {
+        PublishProjection(matrix);
+        ReportProjection(g_projectionOffset);
     }
-    PublishProjection(matrix);
-    ReportProjection(g_projectionOffset);
+    // On EVERY drawing frame, including the ones above that published nothing. The frame's
+    // projection was invalidated at the top of this call and only a publish sets it back,
+    // so a frame with no projection reaches FinishCameraFrame and hides the mark - which is
+    // the answer the placement enum already names. Returning early instead left the mark at
+    // the middle of the screen on a frame the head had turned, claiming the player is
+    // pointing at whatever happens to be there.
     FinishCameraFrame();
     return view;
 }

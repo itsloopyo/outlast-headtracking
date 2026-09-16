@@ -188,6 +188,25 @@ void ReportNoZoomBasisOnce(float gameFov, float baseFov) {
 // burn the session's one line on something that fixed itself.
 constexpr unsigned long kFramesBeforeNoBasis = 300;
 
+// The two zoom lines below are each owed once and both hold for ordinary gameplay, which
+// GetGameplayState answers by walking the game's world chain through a dozen guarded
+// reads. One of these is built per frame and handed to both, so the pair costs one walk
+// rather than two - and none at all on a frame where neither line gets far enough to ask.
+class GameplayOnce {
+public:
+    bool Playing() {
+        if (!m_asked) {
+            m_asked = true;
+            m_playing = GetGameplayState() == GameplayState::Playing;
+        }
+        return m_playing;
+    }
+
+private:
+    bool m_asked = false;
+    bool m_playing = false;
+};
+
 // The line the whole correction is checked against, once per session, on the first
 // GAMEPLAY frame the camera updates rather than the first frame a pose arrives - so it is
 // there without a tracker connected and without loading a save.
@@ -197,7 +216,8 @@ constexpr unsigned long kFramesBeforeNoBasis = 300;
 // gameplay: anything else means the live angle and the reference are not the same
 // measurement, and the symptom in game would be head tracking feeling weak everywhere
 // rather than wrong anywhere.
-void ReportZoomBasisOnce(const ZoomBasis& basis, float gameFov, float baseFov) {
+void ReportZoomBasisOnce(const ZoomBasis& basis, float gameFov, float baseFov,
+                         GameplayOnce& gameplay) {
     static bool reported = false;
     static unsigned long framesWaited = 0;
     static unsigned long framesInvalid = 0;
@@ -216,7 +236,7 @@ void ReportZoomBasisOnce(const ZoomBasis& basis, float gameFov, float baseFov) {
     // factor well off 1.0 on a build where nothing is wrong. The gate this line exists to
     // be read against is that it says x1.0000 in ORDINARY GAMEPLAY, which is the only
     // frame it can be taken from.
-    if (GetGameplayState() != GameplayState::Playing) {
+    if (!gameplay.Playing()) {
         return;
     }
     float aspect = 0.0f;
@@ -254,7 +274,8 @@ constexpr float kZoomedFactorMargin = 0.01f;
 
 // Said once, on the first frame the game actually zooms, which is the evidence that the
 // correction engages rather than merely being armed.
-void ReportZoomEngagedOnce(const ZoomBasis& basis, float gameFov) {
+void ReportZoomEngagedOnce(const ZoomBasis& basis, float gameFov,
+                           GameplayOnce& gameplay) {
     static bool reported = false;
     if (reported || !basis.valid ||
         std::fabs(basis.factor - 1.0f) < kZoomedFactorMargin) {
@@ -263,7 +284,7 @@ void ReportZoomEngagedOnce(const ZoomBasis& basis, float gameFov) {
     // Gameplay only, on the same terms as the basis line above and for the same reason: the
     // front end animates its own field of view against a fixed reference, so without this
     // the session's one line reports the title screen and never the camcorder.
-    if (GetGameplayState() != GameplayState::Playing) {
+    if (!gameplay.Playing()) {
         return;
     }
     if (!ClaimOnce(reported)) {
@@ -313,8 +334,9 @@ float Detour(void* thisptr) {
     // composed against.
     if (IsDrawingFrame()) {
         PublishFrameZoom(zoom.factor);
-        ReportZoomBasisOnce(zoom, gameFov, baseFov);
-        ReportZoomEngagedOnce(zoom, gameFov);
+        GameplayOnce gameplay;
+        ReportZoomBasisOnce(zoom, gameFov, baseFov, gameplay);
+        ReportZoomEngagedOnce(zoom, gameFov, gameplay);
     }
 
     const FovDecision decision = DecideFov(requested, gameFov, baseFov);

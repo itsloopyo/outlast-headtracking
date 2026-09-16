@@ -177,7 +177,11 @@ void PrepareCrosshair(void* controller, const FrameSample& sample,
     }
     t_aim.cleanEye = cleanLocation;
     t_aim.drawnEye = drawnLocation;
+    // Cleared with the flag, not merely flagged: a frame that runs no trace would
+    // otherwise leave the last traced frame's surface on the AimProbe line, beside a
+    // hit=0 that says it is not this frame's.
     t_aim.hit = false;
+    t_aim.target = UE3Vector{};
     const Mat3 aim = RotatorToMatrix(clean);
     t_aim.direction = {aim.m[0][0], aim.m[0][1], aim.m[0][2]};
     if (sample.has_position) {

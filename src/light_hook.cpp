@@ -21,14 +21,18 @@ namespace {
 // How near the frame's eye a light has to be to count as one the player is carrying. The
 // camcorder's light measures zero from it; the hero's other lights sit tens of units out
 // and are switched off anyway, and a level's own lights are nowhere near.
+//
+// Compared squared, because this runs for every moving light in the level on every frame
+// and the square root it would otherwise take buys nothing: both sides are distances.
 constexpr float kEyeRadius = 30.0f;
+constexpr float kEyeRadiusSquared = kEyeRadius * kEyeRadius;
 
 using SetParentToWorld_t = void(*)(void* light);
 
 SetParentToWorld_t g_original = nullptr;
 LightHookTargets   g_targets{};
 
-float LengthOf(float x, float y, float z) { return std::sqrt(x * x + y * y + z * z); }
+float LengthSquaredOf(float x, float y, float z) { return x * x + y * y + z * z; }
 
 bool IsCarriedByThePlayer(std::uintptr_t light, const UE3Vector& eye) {
     std::uint32_t flags = 0;
@@ -42,7 +46,8 @@ bool IsCarriedByThePlayer(std::uintptr_t light, const UE3Vector& eye) {
     if (!std::isfinite(origin.X) || !std::isfinite(origin.Y) || !std::isfinite(origin.Z)) {
         return false;
     }
-    return LengthOf(origin.X - eye.X, origin.Y - eye.Y, origin.Z - eye.Z) <= kEyeRadius;
+    return LengthSquaredOf(origin.X - eye.X, origin.Y - eye.Y, origin.Z - eye.Z) <=
+           kEyeRadiusSquared;
 }
 
 void ReportEngagedOnce(const UE3Rotator& before, const UE3Rotator& after) {

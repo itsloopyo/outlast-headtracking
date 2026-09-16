@@ -12,12 +12,14 @@ An unofficial head tracking mod for Outlast that moves the view with your head w
 
 ## Requirements
 
-- [Outlast](https://store.steampowered.com/app/238320/Outlast/) on Steam, the 2014-04-29
-  build.
+- [Outlast](https://store.steampowered.com/app/238320/Outlast/) on Steam, the
+  2014-04-29 build. Steam is the only store the mod supports: it ships one build
+  profile, for that executable, and a copy from any other store is a different
+  binary that the mod leaves alone.
 - A tracking source that sends the OpenTrack UDP protocol:
   [OpenTrack](https://github.com/opentrack/opentrack) with a webcam or a VR
   headset, or a phone app that speaks it.
-- 64-bit Windows. The mod is a 64-bit DLL and loads into `Binaries\Win64\OLGame.exe`,
+- 64-bit Windows 10 or 11. The mod is a 64-bit DLL and loads into `Binaries\Win64\OLGame.exe`,
   which is the executable the launcher picks on a 64-bit system; a 32-bit install is not
   supported.
 
@@ -29,6 +31,14 @@ the first few lines of `HeadTracking.log` in `Binaries\Win64\`: it either names 
 it matched, or says the build was not recognised and why.
 
 ## Installation
+
+### Lopari
+
+Once this mod is available in [Lopari](https://lopari.app), download Lopari,
+choose **Outlast**, and click **Play with head tracking**. Until then, install it
+with the standalone installer below.
+
+### Standalone Installer
 
 1. Download the installer ZIP from the
    [Releases](https://github.com/itsloopyo/outlast-headtracking/releases) page.
@@ -130,10 +140,9 @@ Two equivalent binding sets - use whichever your keyboard has:
 `Page Down` / `Ctrl+Shift+H` switches yaw between world-space (horizon-locked)
 and camera-local.
 
-There is no recenter key. Center the view in your tracker instead: opentrack's
-Center bind, SteamVR's reset, or the CENTER button in your phone app. The mod
-applies whatever pose the tracker sends, so centring in one place is the whole
-of it.
+Center the view in your tracker: opentrack's Center bind, SteamVR's reset, or
+the CENTER button in your phone app. The mod applies whatever pose the tracker
+sends, so centring in one place is the whole of it.
 
 ## Configuration
 
@@ -210,32 +219,24 @@ without a restart; the INI decides which mode you start in.
 
 ### The camcorder's light
 
-The camcorder lights what it is pointed at, and the game points it where you
-are aiming. With the view and the aim separated, that leaves the lit cone off
-to one side the moment you look away from where you are pointing - and in night
-vision, where that cone is most of what you can see, it is most of the picture.
-
-So the mod turns the camcorder's light by the same amount it turns the view.
-The cone follows your head one for one, while the camcorder still records, and
-still points, where your mouse or controller is aiming. There is nothing to
-configure.
+The camcorder lights what it is pointed at, and the game points it where you are
+aiming, which would leave the lit cone off to one side whenever you look away
+from where you are pointing. In night vision that cone is most of what you can
+see. The mod turns the light by the same amount it turns the view, so the cone
+follows your head while the camcorder still records, and still points, where
+your mouse or controller is aiming.
 
 ### The crosshair
 
-Outlast's own crosshair - the small dot, switched on under Options - marks
-where you are pointing only while the view and the aim are the same thing. Head
-tracking separates them: reaching for a door, a locker or a battery still uses
-the direction your mouse or controller chose, and once your head has turned the
-view away, that direction is no longer the middle of the screen.
-
-So the mod moves the game's own dot to where the game is actually pointing.
-There is nothing to configure and nothing extra drawn on screen - one mark, the
-game's, in the right place. Turn it off the way you always could, in the game's
-Options.
+Outlast's own crosshair, the small dot switched on under Options, marks where
+you are pointing only while the view and the aim are the same thing. Head
+tracking separates them, so the mod moves the game's own dot to where the game
+is actually pointing. Switch the dot on and off the way you always could, in the
+game's Options.
 
 The dot follows the direction the game is pointing rather than the point it is
 pointing at, so leaning your head sideways leaves it a little off what you are
-about to grab - most at arm's reach, less across a room.
+about to grab, most at arm's reach and less across a room.
 
 ### Field of view
 
@@ -257,28 +258,20 @@ and renders the game's field of view.
 
 It changes the frame only: what the game reaches for when you press use, and
 everything else that asks the game the same question, keep the game's own
-answer.
-
-What the angle means on screen is Outlast's own convention rather than the
-mod's. On a 16:9 display, `FieldOfView=110` draws a 115.6 by 83.5 degree frame,
+answer. On a 16:9 display, `FieldOfView=110` draws a 115.6 by 83.5 degree frame,
 and a wider monitor buys width rather than costing height. `HeadTracking.log`
 reports the frame's real angles once per session, so you never have to work
 them out.
 
-### Zooming does not change how far your head moves the view
+### Zoom
 
-Outlast narrows the view when you raise the camcorder and widens it when you
-run. A narrower view magnifies everything in the frame, so without a correction
-the same head turn would sweep further across the screen the moment you lift the
-camcorder, and it would feel like the mod's sensitivity had jumped.
-
-The mod scales the pose by whatever the game is drawing at, so a head turn moves
-the view by the same amount on screen zoomed in as it does walking around. Head
-tilt is left alone, because a tilt rolls the picture by the same angle whatever
-the view is. There is nothing to configure - it is exactly 1.0 in ordinary play,
-and it follows a `FieldOfView` of your own, so an override is not a permanent
-sensitivity change either. `HeadTracking.log` prints the numbers it works from
-once per session.
+Raising the camcorder narrows the view and running widens it, and a narrower
+view magnifies everything in the frame. The mod scales the pose by whatever the
+game is drawing at, so a head turn moves the view by the same amount on screen
+zoomed in as it does walking around. Head tilt is left alone, because a tilt
+rolls the picture by the same angle at any field of view. The scaling follows a
+`FieldOfView` of your own as well, so an override is not a permanent sensitivity
+change. `HeadTracking.log` prints the numbers it works from once per session.
 
 ## Troubleshooting
 

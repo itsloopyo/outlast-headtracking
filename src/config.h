@@ -52,6 +52,9 @@ constexpr bool  kCameraProbe     = false;
 // INI, turned on for one session.
 constexpr bool  kLightProbe      = false;
 
+// Log where the reticle is being placed, once a second. Diagnostic, on the same terms.
+constexpr bool  kAimProbe        = false;
+
 constexpr bool  kPositionEnabled = true;
 constexpr float kPosLimitX       = cameraunlock::PositionSettings{}.limit_x;
 constexpr float kPosLimitY       = cameraunlock::PositionSettings{}.limit_y;
@@ -91,7 +94,7 @@ struct Config {
 
     // Watch the game's light and camcorder natives and report what they are handed.
     bool  light_probe = defaults::kLightProbe;
-    bool  aim_probe = false;
+    bool  aim_probe = defaults::kAimProbe;
 
     // 6DOF positional tracking.
     bool  position_enabled = defaults::kPositionEnabled;

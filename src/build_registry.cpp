@@ -94,10 +94,6 @@ bool SelectBuildProfile(const GameModule& module) {
     return false;
 }
 
-bool HasActiveProfile() {
-    return g_active != nullptr;
-}
-
 const BuildProfile& ActiveProfile() {
     return *g_active;
 }

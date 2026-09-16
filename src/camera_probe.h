@@ -16,11 +16,16 @@ namespace OutlastHeadTracking {
 // record it arms against is only ever read - so arming against something that turns out
 // not to be the camera cannot corrupt a running session.
 //
-// It is not, however, free of side effects on the process, and that is why it is gated on
-// a matched build and off in every shipped INI: finding the writer means a hardware
-// watchpoint, so the pass installs a vectored exception handler that is never removed,
-// and suspends every thread in the process to write DR0 and DR7 into each of them. A
-// debugger's own hardware breakpoint on DR0 does not survive that.
+// It consumes no pinned address of its own - it takes the module's bounds and walks
+// committed memory with VirtualQuery - so it is deliberately NOT gated on a matched build
+// profile: a build no profile describes is exactly what it is for, and gating it would
+// switch it off there.
+//
+// It is not, however, free of side effects on the process, which is why it is off in every
+// shipped INI: finding the writer means a hardware watchpoint, so the pass installs a
+// vectored exception handler that is never removed, and suspends every thread in the
+// process to write DR0 and DR7 into each of them. A debugger's own hardware breakpoint on
+// DR0 does not survive that.
 //
 // Runs on its own thread for the life of the process; a pass takes about fifteen seconds
 // and repeats, reporting only when the finding changes.

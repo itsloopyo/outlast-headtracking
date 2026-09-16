@@ -105,7 +105,7 @@ void WriteDiagnosticsSection(cameraunlock::IniWriter& w) {
     w.WriteComment(" goes on, and what it is pointed at. Diagnostic; leave it false.");
     w.WriteBool("LightProbe", kLightProbe);
     w.WriteComment(" Log the reticle target, camera position and screen offset once a second.");
-    w.WriteBool("AimProbe", false);
+    w.WriteBool("AimProbe", kAimProbe);
 }
 
 // Returns false when the file could not be created, so the caller reports the real
@@ -329,7 +329,7 @@ void ReadHotkeysSection(const cameraunlock::IniReader& ini, Config& cfg) {
 void ReadDiagnosticsSection(const cameraunlock::IniReader& ini, Config& cfg) {
     cfg.camera_probe = ini.ReadBool("Diagnostics", "CameraProbe", kCameraProbe);
     cfg.light_probe = ini.ReadBool("Diagnostics", "LightProbe", kLightProbe);
-    cfg.aim_probe = ini.ReadBool("Diagnostics", "AimProbe", false);
+    cfg.aim_probe = ini.ReadBool("Diagnostics", "AimProbe", kAimProbe);
 }
 
 }  // namespace

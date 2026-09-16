@@ -17,6 +17,7 @@ add_executable(OutlastHeadTrackingTests
     window_placement_tests.cpp
     light_composition_tests.cpp
     build_profile_tests.cpp
+    log_budget_tests.cpp
     ${CMAKE_SOURCE_DIR}/src/ue3_camera_cache.cpp
     ${CMAKE_SOURCE_DIR}/src/steam_offsets.cpp
 )

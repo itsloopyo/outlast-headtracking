@@ -12,6 +12,18 @@
 
 namespace OutlastHeadTracking {
 
+namespace {
+
+// ~60Hz, which is what a key press has to be sampled at to be caught between a player's
+// press and release. It is also HotkeyPoller's own default; stated here so the rate the
+// mod relies on is visible at the call site rather than in another repository.
+constexpr int kPollIntervalMs = 16;
+
+// Room for "0x" and two hex digits, or the word "unbound", and the terminator.
+constexpr int kKeyNameChars = 8;
+
+}  // namespace
+
 bool Hotkeys::Start(const Config& cfg, Action onToggle, Action onCycleMode,
                     Action onYawMode) {
     using cameraunlock::input::ChordGuarded;
@@ -37,7 +49,7 @@ bool Hotkeys::Start(const Config& cfg, Action onToggle, Action onCycleMode,
     // the session carries on with tracking but no hotkeys - which is all a caller could
     // do about it, so the false is the reason in the log rather than a branch.
     try {
-        if (!m_poller.Start(16)) {
+        if (!m_poller.Start(kPollIntervalMs)) {
             Log::Line("ERROR: HotkeyPoller failed to start");
             return false;
         }
@@ -53,10 +65,10 @@ bool Hotkeys::Start(const Config& cfg, Action onToggle, Action onCycleMode,
         if (key == 0) {
             return "unbound";
         }
-        std::snprintf(out, 8, "0x%02X", key);
+        std::snprintf(out, kKeyNameChars, "0x%02X", key);
         return out;
     };
-    char toggle[8], cycle[8], yaw[8];
+    char toggle[kKeyNameChars], cycle[kKeyNameChars], yaw[kKeyNameChars];
     Log::Line("Hotkeys: toggle=%s cyclemode=%s yawmode=%s",
               keyName(cfg.vk_toggle, toggle), keyName(cfg.vk_cycle_mode, cycle),
               keyName(cfg.vk_yaw_mode, yaw));

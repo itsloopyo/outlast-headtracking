@@ -159,9 +159,6 @@ void* Detour(void* thisptr, void* family, void* outLocation, void* outRotation,
     // FSceneView, so a build where the matrix only appears once gameplay starts still finds
     // it. What it costs until then is one scan per drawn frame.
     if (g_projectionOffset < 0) {
-        if (!drawingFrame) {
-            return view;
-        }
         ScanForProjection(view);
         if (g_projectionOffset < 0) {
             return view;

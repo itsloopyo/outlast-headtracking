@@ -37,15 +37,6 @@ void ReportMovedOnce(float clipX, float clipY, float dx, float dy) {
               "offset %.0f/%.0f pixels.", clipX, clipY, dx, dy);
 }
 
-// The one place the mod writes to a game-owned object outside the camera's own
-// out-parameters, so it says exactly what it writes and puts it back.
-//
-// The function being wrapped computes both tiles' position ONCE, as
-// `ClipX * 0.5 - size * 0.5` and the same in Y, and reads the canvas for nothing else -
-// the fade it advances first does not touch it. So biasing the pair by twice the offset
-// wanted moves the dot by exactly that offset and moves nothing else in the frame. The
-// alternative, detouring the tile draw itself, is every UI element in the game paying
-// for one dot.
 void ReportClipRestoreFailedOnce() {
     static bool reported = false;
     if (!ClaimOnce(reported)) {
@@ -56,6 +47,15 @@ void ReportClipRestoreFailedOnce() {
               "of the wrong width. The camera is unaffected.");
 }
 
+// The one place the mod writes to a game-owned object outside the camera's own
+// out-parameters, so it says exactly what it writes and puts it back.
+//
+// The function being wrapped computes both tiles' position ONCE, as
+// `ClipX * 0.5 - size * 0.5` and the same in Y, and reads the canvas for nothing else -
+// the fade it advances first does not touch it. So biasing the pair by twice the offset
+// wanted moves the dot by exactly that offset and moves nothing else in the frame. The
+// alternative, detouring the tile draw itself, is every UI element in the game paying
+// for one dot.
 class ClipBias {
 public:
     ClipBias(std::uintptr_t canvas, float clipX, float clipY, float dx, float dy)

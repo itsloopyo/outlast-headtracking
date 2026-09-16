@@ -13,6 +13,7 @@ int RunCameraCacheTests();
 int RunWindowPlacementTests();
 int RunLightCompositionTests();
 int RunBuildProfileTests();
+int RunLogBudgetTests();
 
 int main() {
     std::cout << "Outlast Head Tracking Tests\n";
@@ -29,6 +30,7 @@ int main() {
     failures += RunWindowPlacementTests();
     failures += RunLightCompositionTests();
     failures += RunBuildProfileTests();
+    failures += RunLogBudgetTests();
 
     if (failures == 0) {
         std::cout << "All tests passed!\n";

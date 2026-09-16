@@ -51,16 +51,15 @@ constexpr int kMaxBaseFovLinesLogged = 4;
 // The line the whole zoom correction is audited from: it names the number every factor on
 // the basis line below is divided by.
 void ReportBaseFov(float baseFov) {
-    static int linesLogged = 0;
-    if (linesLogged >= kMaxBaseFovLinesLogged) {
+    static LogBudget budget(kMaxBaseFovLinesLogged);
+    if (!budget.Take()) {
         return;
     }
-    ++linesLogged;
     Log::Line("Unzoomed field of view: the game draws at %.2f degrees while the player is "
               "neither running nor filming (the hero's own DefaultFOV, which OLGame.ini "
               "authors). Every zoom the head pose is scaled for is measured against that.",
               baseFov);
-    if (linesLogged == kMaxBaseFovLinesLogged) {
+    if (budget.Exhausted()) {
         Log::Line("That is %d changes of the unzoomed field of view; further changes are "
                   "not written down. They still apply.", kMaxBaseFovLinesLogged);
     }
@@ -129,19 +128,18 @@ constexpr int kMaxAppliedLinesLogged = 8;
 // it. Per frame this is one float comparison.
 void ReportApplied(float requested, float baseFov, float gameFov, float scaled) {
     static float s_reportedBase = 0.0f;
-    static int   s_linesLogged = 0;
+    static LogBudget budget(kMaxAppliedLinesLogged);
     if (s_reportedBase == baseFov) {
         return;
     }
     s_reportedBase = baseFov;
-    if (s_linesLogged >= kMaxAppliedLinesLogged) {
+    if (!budget.Take()) {
         return;
     }
-    ++s_linesLogged;
     Log::Line("Field of view override: %.1f over the game's unzoomed %.1f = x%.3f, so "
               "this frame's %.1f renders as %.1f and every zoom is scaled by the same "
               "factor.", requested, baseFov, requested / baseFov, gameFov, scaled);
-    if (s_linesLogged == kMaxAppliedLinesLogged) {
+    if (budget.Exhausted()) {
         Log::Line("The game has changed its unzoomed field of view %d times; further "
                   "changes are not being written down and this file stops growing here. "
                   "The override still applies to every one of them.",

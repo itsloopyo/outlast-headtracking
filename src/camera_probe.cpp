@@ -338,8 +338,7 @@ void ReportWatchpointUnavailable(PassMemory& memory) {
     }
 }
 
-void RunDiscoveryPass(const GameModule& module,
-                      PassMemory& memory) {
+void RunDiscoveryPass(const GameModule& module, PassMemory& memory) {
     // The narration below exists to explain the pass's multi-second waits to someone
     // reading the log live. That is worth one telling and nothing after.
     const bool narrate = memory.signature.empty();
@@ -372,8 +371,8 @@ void RunDiscoveryPass(const GameModule& module,
 
     if (narrate) {
         Log::Line("CameraProbe: %d structural TCameraCache candidate(s). Watching "
-                  "TimeStamps for 6s to find the live one...",
-                  static_cast<int>(candidates.size()));
+                  "TimeStamps for %.0fs to find the live one...",
+                  static_cast<int>(candidates.size()), kTimeStampWatchMs / 1000.0);
     }
     WatchTimeStamps(candidates);
 
@@ -398,14 +397,16 @@ void RunDiscoveryPass(const GameModule& module,
     DataWatchpoint writers;
     DataWatchpoint readers;
     if (narrate) {
-        Log::Line("CameraProbe: capturing writers of POV.Rotation.Yaw @ 0x%llX for 5s...",
-                  (unsigned long long)yaw);
+        Log::Line("CameraProbe: capturing writers of POV.Rotation.Yaw @ 0x%llX for "
+                  "%.0fs...", (unsigned long long)yaw, kCaptureMs / 1000.0);
     }
     if (!Capture(writers, yaw, module, WatchMode::WriteOnly)) {
         ReportWatchpointUnavailable(memory);
         return;
     }
-    if (narrate) Log::Line("CameraProbe: capturing readers for 5s...");
+    if (narrate) {
+        Log::Line("CameraProbe: capturing readers for %.0fs...", kCaptureMs / 1000.0);
+    }
     if (!Capture(readers, yaw, module, WatchMode::ReadOrWrite)) {
         ReportWatchpointUnavailable(memory);
         return;

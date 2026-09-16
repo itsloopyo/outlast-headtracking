@@ -91,22 +91,21 @@ constexpr int kMaxStateChangesLogged = 20;
 void ReportStateChange(GameplayState state) {
     static GameplayState last = GameplayState::NoWorld;
     static bool seen = false;
-    static int logged = 0;
+    static LogBudget budget(kMaxStateChangesLogged);
     if (seen && state == last) {
         return;
     }
     last = state;
     seen = true;
-    if (logged >= kMaxStateChangesLogged) {
+    if (!budget.Take()) {
         return;
     }
-    ++logged;
     if (state == GameplayState::Playing) {
         Log::Line("Gameplay: the head pose is reaching the camera again.");
     } else {
         Log::Line("Gameplay: the head pose is held off this frame - %s.", Describe(state));
     }
-    if (logged == kMaxStateChangesLogged) {
+    if (budget.Exhausted()) {
         Log::Line("Gameplay: that is %d state changes; the rest of this session's are "
                   "not written down.", kMaxStateChangesLogged);
     }
@@ -118,36 +117,57 @@ void ReportStateChange(GameplayState state) {
 // stays in whatever state the read is failing in.
 constexpr int kMaxTraceFailuresLogged = 20;
 
+// How close together two of those lines may fall.
+constexpr ULONGLONG kTraceFailureReportIntervalMs = 1000;
+
 // Rate-limited as well as capped: the spacing keeps a brief failure from costing a line
 // per frame, and the cap keeps a lasting one from costing a line per second.
 void ReportTraceUnavailable() {
     static ULONGLONG lastReport = 0;
-    static int logged = 0;
-    if (logged >= kMaxTraceFailuresLogged) {
-        return;
-    }
+    static LogBudget budget(kMaxTraceFailuresLogged);
     const ULONGLONG now = GetTickCount64();
-    if (now - lastReport < 1000) {
+    if (now - lastReport < kTraceFailureReportIntervalMs) {
         return;
     }
     lastReport = now;
-    ++logged;
+    if (!budget.Take()) {
+        return;
+    }
     Log::Line("WARN: reticle trace could not read the world or player pawn; hiding the "
               "reticle for this frame.");
-    if (logged == kMaxTraceFailuresLogged) {
+    if (budget.Exhausted()) {
         Log::Line("WARN: that is %d frames the reticle trace could not run on; the rest "
                   "of this session's are not written down.", kMaxTraceFailuresLogged);
     }
 }
 
 bool g_aimProbe = false;
-thread_local UE3Vector g_aimTarget{};
-thread_local UE3Vector g_cleanEye{};
-thread_local UE3Vector g_drawnEye{};
-thread_local bool g_aimHit = false;
-thread_local bool g_hasAim = false;
-thread_local UE3Vector g_aimDirection{};
-thread_local UE3Rotator g_drawnRotation{};
+
+// What the viewpoint call worked out about where the game is pointing, held until the
+// scene-view hook has published the projection it has to be divided by - two detours
+// apart, further down the same CalcSceneView.
+//
+// thread_local rather than global, on the same terms as render_frame.h's drawing flag:
+// it describes the frame on this thread's stack, not a state of the mod.
+struct PendingAim {
+    // False until a frame's viewpoint call has filled the rest in. Cleared at the start
+    // of every frame, so a frame that applied no pose places nothing.
+    bool has = false;
+
+    // The direction to project: toward the surface the game would hit when there is one,
+    // and along the game's own forward axis when there is not.
+    UE3Vector direction{};
+    UE3Rotator drawnRotation{};
+
+    // The terms `direction` was built from. Read only by the AimProbe log line, which is
+    // what a reticle that lands wrong is diagnosed from.
+    bool hit = false;
+    UE3Vector target{};
+    UE3Vector cleanEye{};
+    UE3Vector drawnEye{};
+};
+
+thread_local PendingAim t_aim{};
 
 void PrepareCrosshair(void* controller, const FrameSample& sample,
                       const UE3Vector& cleanLocation, const UE3Vector& drawnLocation,
@@ -155,11 +175,11 @@ void PrepareCrosshair(void* controller, const FrameSample& sample,
     if (!sample.has_rotation && !sample.has_position) {
         return;
     }
-    g_cleanEye = cleanLocation;
-    g_drawnEye = drawnLocation;
-    g_aimHit = false;
+    t_aim.cleanEye = cleanLocation;
+    t_aim.drawnEye = drawnLocation;
+    t_aim.hit = false;
     const Mat3 aim = RotatorToMatrix(clean);
-    g_aimDirection = {aim.m[0][0], aim.m[0][1], aim.m[0][2]};
+    t_aim.direction = {aim.m[0][0], aim.m[0][1], aim.m[0][2]};
     if (sample.has_position) {
         UE3Vector target{};
         bool hit = false;
@@ -168,15 +188,15 @@ void PrepareCrosshair(void* controller, const FrameSample& sample,
             PublishAimOffset(CrosshairPlacement::Hidden, 0.0f, 0.0f);
             return;
         }
-        g_aimTarget = target;
-        g_aimHit = hit;
+        t_aim.target = target;
+        t_aim.hit = hit;
         if (hit) {
-            g_aimDirection = {target.X - drawnLocation.X, target.Y - drawnLocation.Y,
-                               target.Z - drawnLocation.Z};
+            t_aim.direction = {target.X - drawnLocation.X, target.Y - drawnLocation.Y,
+                              target.Z - drawnLocation.Z};
         }
     }
-    g_drawnRotation = drawn;
-    g_hasAim = true;
+    t_aim.drawnRotation = drawn;
+    t_aim.has = true;
 }
 
 void ReportNonFinitePoseOnce() {
@@ -187,6 +207,29 @@ void ReportNonFinitePoseOnce() {
     Log::Line("WARN: a tracker pose arrived that is not a finite number, so this frame "
               "kept the game's own viewpoint. Check the tracker app is sending sane "
               "values; nothing else about the session is affected.");
+}
+
+// How close together two AimProbe lines may fall.
+constexpr ULONGLONG kAimProbeIntervalMs = 1000;
+
+// One line a second while [Diagnostics] AimProbe is on, carrying every term the offset
+// was built from. A reticle that lands wrong is a sign, a depth or a projection fault,
+// and only having all three on one line tells them apart.
+void ReportAimProbe(float tanHalfH, float tanHalfV, float ndcX, float ndcY,
+                    AimProjection result) {
+    static ULONGLONG lastProbe = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (now - lastProbe < kAimProbeIntervalMs) {
+        return;
+    }
+    lastProbe = now;
+    Log::Line("Aim: hit=%d clean=%.3f/%.3f/%.3f eye=%.3f/%.3f/%.3f "
+              "target=%.3f/%.3f/%.3f drawn=%d/%d/%d tan=%.5f/%.5f ndc=%.6f/%.6f %s",
+              t_aim.hit, t_aim.cleanEye.X, t_aim.cleanEye.Y, t_aim.cleanEye.Z,
+              t_aim.drawnEye.X, t_aim.drawnEye.Y, t_aim.drawnEye.Z,
+              t_aim.target.X, t_aim.target.Y, t_aim.target.Z,
+              t_aim.drawnRotation.Pitch, t_aim.drawnRotation.Yaw, t_aim.drawnRotation.Roll,
+              tanHalfH, tanHalfV, ndcX, ndcY, Describe(result));
 }
 
 void Detour(void* controller, UE3Vector* outLocation, UE3Rotator* outRotation) {
@@ -267,12 +310,12 @@ void Detour(void* controller, UE3Vector* outLocation, UE3Rotator* outRotation) {
 }  // namespace
 
 void BeginCameraFrame() {
-    g_hasAim = false;
+    t_aim.has = false;
     PublishAimOffset(CrosshairPlacement::GamesOwn, 0.0f, 0.0f);
 }
 
 void FinishCameraFrame() {
-    if (!g_hasAim) {
+    if (!t_aim.has) {
         return;
     }
     float tanHalfH = 0.0f;
@@ -283,21 +326,12 @@ void FinishCameraFrame() {
     }
     float x = 0.0f;
     float y = 0.0f;
-    const AimProjection result = ProjectAimDirection(g_aimDirection, g_drawnRotation,
-                                                      tanHalfH, tanHalfV, &x, &y);
+    const AimProjection result = ProjectAimDirection(t_aim.direction, t_aim.drawnRotation,
+                                                     tanHalfH, tanHalfV, &x, &y);
     PublishAimOffset(result == AimProjection::Ok ? CrosshairPlacement::Offset :
                                                    CrosshairPlacement::Hidden, x, y);
-    static ULONGLONG lastProbe = 0;
-    const ULONGLONG now = GetTickCount64();
-    if (g_aimProbe && now - lastProbe >= 1000) {
-        lastProbe = now;
-        Log::Line("Aim: hit=%d clean=%.3f/%.3f/%.3f eye=%.3f/%.3f/%.3f "
-                  "target=%.3f/%.3f/%.3f drawn=%d/%d/%d tan=%.5f/%.5f ndc=%.6f/%.6f %s",
-                  g_aimHit, g_cleanEye.X, g_cleanEye.Y, g_cleanEye.Z,
-                  g_drawnEye.X, g_drawnEye.Y, g_drawnEye.Z,
-                  g_aimTarget.X, g_aimTarget.Y, g_aimTarget.Z,
-                  g_drawnRotation.Pitch, g_drawnRotation.Yaw, g_drawnRotation.Roll,
-                  tanHalfH, tanHalfV, x, y, Describe(result));
+    if (g_aimProbe) {
+        ReportAimProbe(tanHalfH, tanHalfV, x, y, result);
     }
 }
 

@@ -3,6 +3,7 @@
 
 #include "tracking_runtime.h"
 
+#include "log_once.h"
 #include "logging.h"
 
 #include <chrono>
@@ -101,7 +102,7 @@ void TrackingRuntime::LinkMonitorThread() {
     // nothing ever arrived" still needs saying and nothing else says it.
     Link reported = m_receiver.IsRetrying() ? Link::WaitingForPort : Link::Unknown;
     bool everReceived = false;
-    int changesLogged = 0;
+    LogBudget changes(kMaxLinkChangesLogged);
     bool capReported = false;
 
     // The later of "the port became ours" and "a packet arrived". Measuring silence
@@ -141,9 +142,8 @@ void TrackingRuntime::LinkMonitorThread() {
         reported = now;
 
         // See kMaxLinkChangesLogged for why the change log is capped at all.
-        if (changesLogged >= kMaxLinkChangesLogged) {
-            if (!capReported) {
-                capReported = true;
+        if (!changes.Take()) {
+            if (ClaimOnce(capReported)) {
                 Log::Line("The tracker link has changed between receiving and idle %d "
                           "times, so further changes are not being written down and this "
                           "file stops growing here. The link is intermittent: check the "
@@ -152,7 +152,6 @@ void TrackingRuntime::LinkMonitorThread() {
             }
             continue;
         }
-        ++changesLogged;
 
         switch (now) {
             case Link::WaitingForPort:

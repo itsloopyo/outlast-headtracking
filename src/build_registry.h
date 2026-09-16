@@ -26,10 +26,4 @@ bool SelectBuildProfile(const GameModule& module);
 // is only installed after it has.
 const BuildProfile& ActiveProfile();
 
-// Whether SelectBuildProfile matched. The diagnostics ask before they touch the process:
-// both probes reach the game through addresses this profile names, so on an unrecognised
-// build there is nothing for them to reach and the dormancy contract above applies to
-// them as much as to the hooks.
-bool HasActiveProfile();
-
 }  // namespace OutlastHeadTracking

@@ -25,6 +25,11 @@ static_assert(sizeof(CheckResult) == 0x68);
 static_assert(offsetof(CheckResult, location) == 0x10);
 static_assert(offsetof(CheckResult, time) == 0x28);
 
+// How far along the aim the trace reaches, in the engine's centimetres - a kilometre,
+// which is past the far side of any room in this game. A miss returns this point, and the
+// reticle then projects the direction rather than a surface.
+constexpr float kTraceRangeCm = 100000.0f;
+
 // SingleLineCheck returns true on a miss and writes only Actor and Time on that path.
 using SingleLineCheck = bool(*)(void*, CheckResult*, void*, const UE3Vector*,
                                 const UE3Vector*, std::uint32_t, const UE3Vector*, void*);
@@ -51,10 +56,9 @@ bool TraceCameraAim(void* controller, const UE3Vector& eye, const UE3Rotator& ro
         return false;
     }
     const Mat3 aim = RotatorToMatrix(rotation);
-    constexpr float range = 100000.0f;
-    const UE3Vector end{eye.X + aim.m[0][0] * range,
-                        eye.Y + aim.m[0][1] * range,
-                        eye.Z + aim.m[0][2] * range};
+    const UE3Vector end{eye.X + aim.m[0][0] * kTraceRangeCm,
+                        eye.Y + aim.m[0][1] * kTraceRangeCm,
+                        eye.Z + aim.m[0][2] * kTraceRangeCm};
     const UE3Vector extent{};
     CheckResult result;
     // AActor::execTrace uses 0x20BF for a zero-extent trace including actors.

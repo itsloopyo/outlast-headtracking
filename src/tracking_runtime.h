@@ -5,7 +5,6 @@
 
 #include "config.h"
 #include "frame_sample.h"
-#include "frame_zoom.h"
 
 #include "cameraunlock/protocol/udp_receiver.h"
 #include "cameraunlock/time/frame_clock.h"

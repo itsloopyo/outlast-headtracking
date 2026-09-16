@@ -112,6 +112,34 @@ void ReportStateChange(GameplayState state) {
     }
 }
 
+// The same rule as the gate above, for the only other line a stuck condition can
+// repeat. A trace that cannot read the world fails on every frame it is asked, so the
+// second-long spacing on its own still writes a line a second for as long as the player
+// stays in whatever state the read is failing in.
+constexpr int kMaxTraceFailuresLogged = 20;
+
+// Rate-limited as well as capped: the spacing keeps a brief failure from costing a line
+// per frame, and the cap keeps a lasting one from costing a line per second.
+void ReportTraceUnavailable() {
+    static ULONGLONG lastReport = 0;
+    static int logged = 0;
+    if (logged >= kMaxTraceFailuresLogged) {
+        return;
+    }
+    const ULONGLONG now = GetTickCount64();
+    if (now - lastReport < 1000) {
+        return;
+    }
+    lastReport = now;
+    ++logged;
+    Log::Line("WARN: reticle trace could not read the world or player pawn; hiding the "
+              "reticle for this frame.");
+    if (logged == kMaxTraceFailuresLogged) {
+        Log::Line("WARN: that is %d frames the reticle trace could not run on; the rest "
+                  "of this session's are not written down.", kMaxTraceFailuresLogged);
+    }
+}
+
 bool g_aimProbe = false;
 thread_local UE3Vector g_aimTarget{};
 thread_local UE3Vector g_cleanEye{};
@@ -136,13 +164,7 @@ void PrepareCrosshair(void* controller, const FrameSample& sample,
         UE3Vector target{};
         bool hit = false;
         if (!TraceCameraAim(controller, cleanLocation, clean, target, hit)) {
-            static ULONGLONG lastReport = 0;
-            const ULONGLONG now = GetTickCount64();
-            if (now - lastReport >= 1000) {
-                lastReport = now;
-                Log::Line("WARN: reticle trace could not read the world or player pawn; "
-                          "hiding the reticle for this frame.");
-            }
+            ReportTraceUnavailable();
             PublishAimOffset(CrosshairPlacement::Hidden, 0.0f, 0.0f);
             return;
         }

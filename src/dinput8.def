@@ -1,0 +1,13 @@
+; SPDX-License-Identifier: MIT
+; Copyright (c) 2026 itsloopyo
+
+; OLGame.exe imports exactly one function from DINPUT8.dll - DirectInput8Create, by
+; name. The system DLL also exports DllCanUnloadNow, DllGetClassObject,
+; DllRegisterServer and DllUnregisterServer; none of them is imported by the game or
+; reachable through this copy, because nothing in the process asks this module for a
+; COM class factory. Exporting stubs for them would add four forwarders that can only
+; ever be called by something that found this file by name, which is not a caller worth
+; standing up.
+LIBRARY dinput8
+EXPORTS
+    DirectInput8Create

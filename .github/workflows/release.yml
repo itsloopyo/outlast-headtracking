@@ -1,0 +1,32 @@
+name: Release
+run-name: "Release ${{ github.ref_name }}"
+
+# Everything this release does lives in cameraunlock-core's release-mod.yml:
+# checkout with full history and submodules, tag extraction and validation
+# against CMakeLists.txt, MSBuild setup, `pixi run package`, release notes via
+# scripts/generate-release-notes.ps1, the installer ZIP check and
+# `gh release create`. Only the values below are this mod's. Pinned to a commit
+# SHA, never a branch: that workflow runs with contents:write, the Discord
+# webhook and the Lopari PAT.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    uses: itsloopyo/cameraunlock-core/.github/workflows/release-mod.yml@435915a8a3d8e1b799cc169b74f1fcf72b9534e7
+    with:
+      project-name: 'Outlast Head Tracking'
+      version-source: cmake
+      version-path: 'CMakeLists.txt'
+      # The same set release.ps1 hands New-ChangelogFromCommits, so the CHANGELOG in the
+      # installer ZIP and the GitHub release notes for a tag describe the same commits. A
+      # release whose user-facing work was a packaging or build fix is invisible on the
+      # release page if this list is the shorter of the two.
+      artifact-paths: 'src/ cameraunlock-core/ scripts/ CMakeLists.txt'
+      setup-msbuild: true
+    permissions:
+      contents: write
+    secrets: inherit

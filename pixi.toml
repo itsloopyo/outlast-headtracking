@@ -1,0 +1,75 @@
+[workspace]
+name = "outlast-head-tracking"
+version = "0.0.0"
+description = "6DOF head tracking mod for Outlast via OpenTrack UDP"
+license = "MIT"
+license-file = "LICENSE"
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[tasks]
+sync = "git submodule update --remote cameraunlock-core"
+
+# -A x64, matching CMakeLists.txt's own hard stop: OutlastLauncher.exe picks
+# Binaries\Win64\OLGame.exe on 64-bit Windows and a Win32 DLL is silently refused
+# by that process. No -G, so CMake takes whatever Visual Studio the machine has -
+# pinning "Visual Studio 17 2022" breaks the moment a CI runner image moves on.
+setup = { cmd = """
+    powershell -Command "if (-not (Test-Path 'build')) { cmake -B build -A x64 } else { Write-Host 'Build directory exists, skipping setup' -ForegroundColor Yellow }"
+""" }
+
+build         = { cmd = "cmake --build build --config Debug",   depends-on = ["setup"] }
+build-release = { cmd = "cmake --build build --config Release", depends-on = ["setup"] }
+
+# The mod's own tests. They cover the pure logic - rotator arithmetic, head-pose
+# composition, config boundary checks, the field-of-view decision and the camera-cache
+# predicates - so they need neither the game nor a running process. Their own build
+# directory, because the mod target writes bin/Release/dinput8.dll and a test build
+# sharing `build` would overwrite whatever `pixi run package` had just produced.
+setup-tests = { cmd = "cmake -B build-tests -A x64 -DOLHT_BUILD_TESTS=ON" }
+build-tests = { cmd = "cmake --build build-tests --config Release --target OutlastHeadTrackingTests", depends-on = ["setup-tests"] }
+test        = { cmd = "ctest --test-dir build-tests -C Release --output-on-failure", depends-on = ["build-tests"] }
+
+deploy  = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Debug",   depends-on = ["build"] }
+install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build-release"] }
+
+# /y because a pixi task is unattended: without it uninstall.cmd stops on `pause` and the
+# task hangs. There is no `uninstall-all` counterpart - this mod ships no loader, so
+# --force has nothing extra to remove and that task was `uninstall` under a second name.
+uninstall = { cmd = 'cmd /c scripts\uninstall.cmd /y' }
+
+# There is no vendored loader to refresh. The mod ships AS dinput8.dll, which the
+# game imports and loads itself, so vendor/ does not exist and the installer has
+# no loader archive to extract. The task is kept so the fleet's task set is the
+# same everywhere; nothing depends on it, here or anywhere else.
+update-deps = "powershell -NoProfile -Command \"Write-Host 'No vendored dependencies to update (shim-only mod).'\""
+
+# cmake -E rather than a PowerShell one-liner: pixi's task shell expands `$name`
+# itself before the command is spawned, so a `$d` loop variable arrives at
+# powershell.exe as an empty string and the task dies on a parse error rather
+# than deleting anything. `cmake -E rm -rf` takes the paths as plain arguments,
+# needs no shell variable, and succeeds on a path that is already absent.
+clean     = "cmake -E rm -rf build build-tests"
+clean-all = "cmake -E rm -rf build build-tests release"
+
+# Depends on `test` as well as on the release build. Nothing else between a developer's
+# keyboard and a published GitHub Release runs ctest: release.ps1 calls build-release then
+# package, and build.yml - the one workflow that does test - skips a commit whose subject
+# begins "Release v", which is exactly what release.ps1 commits. Without this line a broken
+# axis sign ships.
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release", "test", "validate-notices"] }
+release = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/release.ps1" }
+release-nightly = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/release-nightly.ps1" }
+
+# The licence gate: every dependency compiled into dinput8.dll or shipped beside it has to
+# have its licence text reproduced in THIRD-PARTY-NOTICES.md, not merely named.
+validate-notices = "node cameraunlock-core/scripts/validate-notices.mjs ."
+
+# A documented no-op, not an omission. The launcher package contract is a
+# launcher-manifest.json at the release ZIP root, and this mod does not carry one yet
+# because lopari does not list it - core's validate-manifest.mjs has nothing to read until
+# it does. The task exists so the fleet's task set is the same everywhere, and so that
+# adding the manifest is a one-line change here rather than a missing gate nobody notices.
+validate-manifest = "powershell -NoProfile -Command \"Write-Host 'No launcher-manifest.json: this mod is not in the lopari catalogue yet. Add the manifest and point this task at cameraunlock-core/scripts/validate-manifest.mjs when it is.'\""
+
+[dependencies]

@@ -168,8 +168,8 @@ All rights reserved.
 
 - **License:** none granted, and none needed. The mod contains no Outlast code, no
   extracted asset, no text and no audio, and requires a legitimately purchased copy of
-  the game to be of any use. The one piece of Red Barrels' material this repository
-  holds is the README's demo clip, which has its own section below.
+  the game to be of any use. Nothing of Red Barrels' is in this repository apart from
+  the README's demo clip, which has its own section below.
 - **Usage:** The mod is loaded by the game and modifies only what the player sees. It
   does not alter save data, bypass any licence check, or change what the game reports
   to anyone.
@@ -179,13 +179,16 @@ All rights reserved.
 
 ## Outlast footage
 
-- **File:** `assets/readme-clip.gif`, the clip embedded at the top of `README.md`.
+- **File:** `assets/readme-clip.gif`, the clip the top of `README.md` embeds from the
+  `main` branch.
 - **Rights holder:** Red Barrels, together with the rights holders of any third-party
   marks visible in frame.
 - **Usage:** recorded from the game running with this mod, captured on a legitimately
   purchased copy, shown so a reader can see what the mod does before installing it.
-- **Bundled:** no. It is kept in this repository only. The packaging scripts ship no
-  part of `assets/`, so it is in neither release ZIP nor anything the launcher deploys.
+- **Bundled:** no. The packaging scripts copy the built `dinput8.dll`, the install
+  scripts and the documentation at the repo root, and no part of `assets/`, so the clip
+  is in neither release ZIP nor anything the launcher deploys. Wherever it is published,
+  this section is the statement of terms it is published under.
 - **Licence:** none is granted or implied by this repository. This material is not
   covered by the MIT licence in `LICENSE`, and nothing here permits reuse of it. Rights
   holders who would rather it were not published: open an issue or reach us on Discord

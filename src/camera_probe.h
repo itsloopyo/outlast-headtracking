@@ -8,7 +8,7 @@ namespace OutlastHeadTracking {
 // Diagnostic aid, off in every shipped INI. Finds the live UE3
 // TCameraCache by scanning committed memory for the record layout and keeping the
 // one whose TimeStamp advances every frame, then reports - as module RVAs, which is
-// what pastes into Ghidra - the instruction that writes the POV each frame and every
+// what a build profile pins - the instruction that writes the POV each frame and every
 // instruction that reads it.
 //
 // Those two sets are what a new game build needs: the writer is where the head pose

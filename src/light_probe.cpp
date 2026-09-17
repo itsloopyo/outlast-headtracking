@@ -207,8 +207,8 @@ void ReportLights(const GameModule& module, const FoundLight* lights, std::size_
         // The vtable is validated when the light is found and read again from a later
         // snapshot to print, and a level load between the two frees and reuses the object.
         // An RVA taken off a pointer that is no longer in the module is a plausible-looking
-        // number that the next session pastes into Ghidra, so it is only printed when the
-        // pointer still lands inside OLGame.exe.
+        // number that would be pinned into a build profile as an offset, so it is only
+        // printed when the pointer still lands inside OLGame.exe.
         const bool inModule = module.Contains(light.vtable);
         Log::Line("LightProbe:   %p vtable %s%llx %s, %.0f from the eye, facing "
                   "%.3f/%.3f/%.3f - %.1f deg off where the game points, %.1f deg off "

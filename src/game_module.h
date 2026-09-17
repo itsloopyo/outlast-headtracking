@@ -8,8 +8,8 @@
 namespace OutlastHeadTracking {
 
 // Address range of the running game EXE. Every address the discovery tool
-// reports is converted to a module RVA through this, because an RVA is what
-// pastes into Ghidra and what a build profile pins.
+// reports is converted to a module RVA through this, because an RVA is what a
+// build profile pins and what is the same on every run.
 struct GameModule {
     uintptr_t base = 0;
     uintptr_t end  = 0;

@@ -63,10 +63,9 @@ mcp-servers/
 Thumbs.db
 
 # Game-derived material - NEVER commit, and never keep in this tree.
-# The game EXE, Ghidra/IDA projects built from it, and decompiler output are
-# copyrighted works of Red Barrels. Reverse engineering for interoperability
-# happens outside this repository; only our own findings (RVAs, struct offsets,
-# notes) come back in.
+# The game EXE, any analysis project built from it, and decompiler output are
+# copyrighted works of Red Barrels and have no place here. What this repository
+# holds is our own findings about the interface: RVAs, struct offsets and notes.
 OLGame.exe
 *.gpr
 *.rep/
@@ -76,7 +75,7 @@ OLGame.exe
 *_decomp.c
 *_decompiled.c
 
-# Scratch working directory for a reverse-engineering session, and the bulky,
+# Scratch working directory for a local investigation session, and the bulky,
 # non-deliverable output such a session produces: screenshots and frame grabs,
 # memory dumps, traces and captured logs. None of it belongs in a public repo -
 # and deleting the branch later does not unpublish it, because the host keeps

@@ -25,7 +25,7 @@ struct PeFingerprint {
 };
 
 // Everything the mod pins to an address inside one build. RVAs are relative to the
-// module base, which is what pastes into Ghidra and what survives ASLR.
+// module base, so the numbers below describe the image wherever Windows loads it.
 struct OffsetTable {
     // ULocalPlayer::CalcSceneView. Returns the FSceneView the frame is rendered from,
     // which carries the projection matrix the frame was really drawn with.

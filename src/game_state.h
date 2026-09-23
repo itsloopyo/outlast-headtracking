@@ -40,7 +40,9 @@ struct GameStateTargets {
     std::size_t    offObjectClass;
     std::size_t    offStructSuperStruct;
     std::size_t    offWorldInfoFlags;
-    std::uint32_t  maskIsMenuLevel;
+    // Pointer-width to match OffsetTable's, which it is copied from - see the note on
+    // padding there. The flag itself is a bit of a dword in the game.
+    std::size_t    maskIsMenuLevel;
 };
 
 void InitGameState(const GameStateTargets& targets);

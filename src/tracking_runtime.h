@@ -46,6 +46,12 @@ public:
     // the pose for the frame's field of view - see ClampedToLimits.
     PositionLimits GetPositionLimits() const;
 
+    // Seconds between this frame and the last, as the pipeline measured them. The lean
+    // clamp eases its allowance open on the same clock the smoothing runs on, and one
+    // frame interval measured twice is two numbers that drift apart under a stall.
+    // Only valid on the thread SampleFrame runs on, which is the only one that asks.
+    float LastFrameDtSec() const { return m_lastDt; }
+
 private:
     static constexpr float kMaxFrameDtSec = 0.25f;
 
@@ -96,6 +102,9 @@ private:
     // the view where it was. Touched only from SampleFrame, i.e. only on the thread
     // the camera detour runs on.
     FrameSample m_held{};
+
+    // Touched only from SampleFrame, on the render thread, like m_held.
+    float m_lastDt = 0.0f;
 
     std::thread m_linkMonitor;
 

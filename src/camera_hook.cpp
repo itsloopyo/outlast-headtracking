@@ -6,7 +6,9 @@
 #include "aim_offset.h"
 #include "camera_trace.h"
 #include "aim_projection.h"
+#include "config.h"
 #include "frame_projection.h"
+#include "lean_trace.h"
 #include "frame_sample.h"
 #include "frame_zoom.h"
 #include "frame_view.h"
@@ -18,6 +20,8 @@
 #include "render_frame.h"
 #include "tracking_runtime.h"
 #include "ue3_types.h"
+
+#include "cameraunlock/camera/lean_clamp.h"
 
 #include <windows.h>
 #include <intrin.h>
@@ -143,6 +147,71 @@ void ReportTraceUnavailable() {
 
 bool g_aimProbe = false;
 
+// Cuts the lean to what the level leaves room for. Touched only from the detour, so it
+// needs no synchronisation of its own: one camera, one render thread, one allowance.
+//
+// The query is null until the configuration turns it on, and null IS the feature switched
+// off - the clamp passes a null query straight through. The mod ships that way, because
+// the trace mask behind it has not yet been watched working in a real level, and a mask
+// that is wrong either blocks on nothing or blocks on everything.
+cameraunlock::camera::LeanClamp g_leanClamp;
+cameraunlock::camera::LeanQueryFn g_leanQuery = nullptr;
+
+// How close together two lines about the clamp may fall. It has three states worth
+// reporting and they change as the player walks, so the transitions on their own would
+// write a line every time somebody steps past a doorframe.
+constexpr ULONGLONG kLeanReportIntervalMs = 5000;
+
+// Says what the clamp is doing, on each change and then no more often than the interval
+// above. The failed-query case is a state of its own rather than a silence: transitions
+// alone cannot tell "the check runs and the room is open" from "the check is not running
+// at all", and those need different fixes.
+void ReportLeanState() {
+    enum class LeanState { Clear, Contact, QueryFailed };
+    const LeanState now = g_leanClamp.LastQueryFailed() ? LeanState::QueryFailed
+                        : g_leanClamp.InContact()       ? LeanState::Contact
+                                                        : LeanState::Clear;
+    static LeanState last = LeanState::Clear;
+    static bool seen = false;
+    static ULONGLONG lastReport = 0;
+    const ULONGLONG ms = GetTickCount64();
+    if (seen && now == last && ms - lastReport < kLeanReportIntervalMs) {
+        return;
+    }
+    last = now;
+    seen = true;
+    lastReport = ms;
+    switch (now) {
+        case LeanState::Clear:
+            Log::Line("Lean: the level leaves room for the whole lean.");
+            return;
+        case LeanState::Contact:
+            Log::Line("Lean: held short of a surface.");
+            return;
+        case LeanState::QueryFailed:
+            Log::Line("WARN: Lean: the world check could not run, so the lean is not being "
+                      "held off anything this frame.");
+            return;
+    }
+}
+
+// The seam head_pose.h asks its lean through: the fraction of the asked-for lean the
+// level leaves room for.
+float LimitLean(void* controller, const UE3Vector& cleanEye, const float world[3]) {
+    const cameraunlock::math::Vec3 desired{world[0], world[1], world[2]};
+    const float wanted = desired.Magnitude();
+    const cameraunlock::math::Vec3 allowed =
+        g_leanClamp.Apply({cleanEye.X, cleanEye.Y, cleanEye.Z}, desired,
+                          g_tracking->LastFrameDtSec(), g_leanQuery, controller);
+    ReportLeanState();
+    // A lean too small to have a direction is one the clamp returned untouched, and
+    // dividing by it would turn that into a NaN scale on a frame that needed no clamp.
+    if (wanted <= 0.0f) {
+        return 1.0f;
+    }
+    return allowed.Magnitude() / wanted;
+}
+
 // What the viewpoint call worked out about where the game is pointing, held until the
 // scene-view hook has published the projection it has to be divided by - two detours
 // apart, further down the same CalcSceneView.
@@ -254,6 +323,10 @@ void Detour(void* controller, UE3Vector* outLocation, UE3Rotator* outRotation) {
     const GameplayState state = GetGameplayState();
     ReportStateChange(state);
     if (state != GameplayState::Playing) {
+        // The allowance describes the room the eye is standing in, and a frame the gate
+        // holds off is the other side of a load or a chapter change. Carrying it across
+        // would ration the first lean of the next level against the last room's wall.
+        g_leanClamp.Reset();
         PublishAimOffset(CrosshairPlacement::GamesOwn, 0.0f, 0.0f);
         // Published with the two rotators equal, which is how a consumer reads "the head
         // did not turn this frame". Skipping the publish instead would leave the last
@@ -299,7 +372,7 @@ void Detour(void* controller, UE3Vector* outLocation, UE3Rotator* outRotation) {
     const UE3Rotator clean = *outRotation;
     Lean lean;
     if (!ApplyHeadPose(g_tracking->IsWorldSpaceYaw(), sample, outLocation, outRotation,
-                       &lean)) {
+                       &lean, g_leanQuery ? &LimitLean : nullptr, controller)) {
         ReportNonFinitePoseOnce();
         PublishAimOffset(CrosshairPlacement::GamesOwn, 0.0f, 0.0f);
         PublishFrameView(*outLocation, *outRotation, *outRotation);
@@ -349,10 +422,28 @@ void FinishCameraFrame() {
     }
 }
 
-bool InstallCameraHook(const CameraHookTargets& targets, TrackingRuntime& tracking, bool aimProbe) {
+bool InstallCameraHook(const CameraHookTargets& targets, TrackingRuntime& tracking,
+                       const Config& cfg) {
     g_tracking = &tracking;
-    g_aimProbe = aimProbe;
+    g_aimProbe = cfg.aim_probe;
     g_sceneViewReturn = reinterpret_cast<void*>(targets.sceneViewReturn);
+
+    if (cfg.collision_enabled) {
+        cameraunlock::camera::LeanClampSettings settings;
+        settings.skin = cfg.collision_margin;
+        settings.release_smoothing = cfg.collision_release_smoothing;
+        g_leanClamp.SetSettings(settings);
+        lean_trace::SetTraceFlags(static_cast<unsigned int>(cfg.collision_channel));
+        g_leanQuery = &lean_trace::Query;
+        Log::Line("Lean clamp on: the view is held %.0f units off whatever the game's own "
+                  "line check stops on (mask 0x%X), and the allowance reopens at %.2f.",
+                  cfg.collision_margin, cfg.collision_channel,
+                  cfg.collision_release_smoothing);
+    } else {
+        Log::Line("Lean clamp off ([Position] CollisionEnabled is 0): a lean is held "
+                  "inside the configured limits but is not checked against the level, so "
+                  "leaning hard into a wall can put the view through it.");
+    }
 
     void* target = reinterpret_cast<void*>(targets.getPlayerViewPoint);
     const MH_STATUS st = CreateAndEnableHook(target, reinterpret_cast<void*>(&Detour),

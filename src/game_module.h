@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "build_profile.h"
+
 #include <cstdint>
 
 namespace OutlastHeadTracking {
@@ -13,6 +15,11 @@ namespace OutlastHeadTracking {
 struct GameModule {
     uintptr_t base = 0;
     uintptr_t end  = 0;
+    // Read by the same walk that produced the range, and carried rather than read
+    // again: the two come from one another's header fields, so a second walk is a
+    // second chance for them to disagree and a branch on a failure that has already
+    // been handled.
+    PeFingerprint fingerprint{};
 
     bool Contains(uintptr_t address) const { return address >= base && address < end; }
     uintptr_t Rva(uintptr_t address) const { return address - base; }

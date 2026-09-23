@@ -8,6 +8,7 @@
 namespace OutlastHeadTracking {
 
 class TrackingRuntime;
+struct Config;
 
 void BeginCameraFrame();
 void FinishCameraFrame();
@@ -41,6 +42,9 @@ struct CameraHookTargets {
 
 // Detours the viewpoint accessor and composes `tracking`'s pose into the frame's answer.
 // `tracking` must outlive the hook, which for the whole life of the process it does.
-bool InstallCameraHook(const CameraHookTargets& targets, TrackingRuntime& tracking, bool aimProbe);
+// `cfg` is read here and not kept: what the detour needs from it is the diagnostic
+// switch and the lean clamp's settings, and both are fixed for the session.
+bool InstallCameraHook(const CameraHookTargets& targets, TrackingRuntime& tracking,
+                       const Config& cfg);
 
 }  // namespace OutlastHeadTracking

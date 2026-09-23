@@ -33,6 +33,7 @@ constexpr float kTraceRangeCm = 100000.0f;
 // SingleLineCheck returns true on a miss and writes only Actor and Time on that path.
 using SingleLineCheck = bool(*)(void*, CheckResult*, void*, const UE3Vector*,
                                 const UE3Vector*, std::uint32_t, const UE3Vector*, void*);
+
 SingleLineCheck g_trace = nullptr;
 std::uintptr_t g_world = 0;
 std::size_t g_pawnOffset = 0;
@@ -46,8 +47,8 @@ void InitCameraTrace(std::uintptr_t base, const OffsetTable& offsets) {
     Log::Line("Reticle surface trace ready: UWorld::SingleLineCheck @ 0x%p", g_trace);
 }
 
-bool TraceCameraAim(void* controller, const UE3Vector& eye, const UE3Rotator& rotation,
-                    UE3Vector& target, bool& hit) {
+bool TraceWorldLine(void* controller, const UE3Vector& start, const UE3Vector& end,
+                    std::uint32_t flags, UE3Vector& impact, bool& hit) {
     void* world = nullptr;
     void* pawn = nullptr;
     if (!cameraunlock::memory::SafeRead(g_world, world) || !world ||
@@ -55,16 +56,20 @@ bool TraceCameraAim(void* controller, const UE3Vector& eye, const UE3Rotator& ro
                                           g_pawnOffset, pawn) || !pawn) {
         return false;
     }
+    const UE3Vector extent{};
+    CheckResult result;
+    hit = !g_trace(world, &result, pawn, &end, &start, flags, &extent, nullptr);
+    impact = hit ? result.location : end;
+    return true;
+}
+
+bool TraceCameraAim(void* controller, const UE3Vector& eye, const UE3Rotator& rotation,
+                    UE3Vector& target, bool& hit) {
     const Mat3 aim = RotatorToMatrix(rotation);
     const UE3Vector end{eye.X + aim.m[0][0] * kTraceRangeCm,
                         eye.Y + aim.m[0][1] * kTraceRangeCm,
                         eye.Z + aim.m[0][2] * kTraceRangeCm};
-    const UE3Vector extent{};
-    CheckResult result;
-    // AActor::execTrace uses 0x20BF for a zero-extent trace including actors.
-    hit = !g_trace(world, &result, pawn, &end, &eye, 0x20BFu, &extent, nullptr);
-    target = hit ? result.location : end;
-    return true;
+    return TraceWorldLine(controller, eye, end, kTraceAllFlags, target, hit);
 }
 
 }  // namespace OutlastHeadTracking

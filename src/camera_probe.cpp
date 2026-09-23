@@ -81,8 +81,18 @@ void ScanForCaches(std::vector<Candidate>& out, size_t cap) {
         if (VirtualQuery(reinterpret_cast<void*>(addr), &mbi, sizeof(mbi)) == 0) break;
         const uintptr_t base = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
         const size_t regionSize = mbi.RegionSize;
-        const bool scannable = (mbi.State == MEM_COMMIT) &&
-                               (mbi.Protect & PAGE_READWRITE) &&
+        // The page-protection constants are enumerated values, not combinable flags, so
+        // `Protect & PAGE_READWRITE` only ever matches PAGE_READWRITE itself: written that
+        // way the scan silently walked past every PAGE_EXECUTE_READWRITE and
+        // PAGE_WRITECOPY region and reported "nothing matched the layout" for a cache
+        // sitting in one. PAGE_GUARD and PAGE_NOCACHE ARE modifier bits, which is why they
+        // are masked off first.
+        const DWORD access = mbi.Protect & ~static_cast<DWORD>(PAGE_GUARD | PAGE_NOCACHE |
+                                                               PAGE_WRITECOMBINE);
+        const bool writable = access == PAGE_READWRITE || access == PAGE_WRITECOPY ||
+                              access == PAGE_EXECUTE_READWRITE ||
+                              access == PAGE_EXECUTE_WRITECOPY;
+        const bool scannable = (mbi.State == MEM_COMMIT) && writable &&
                                !(mbi.Protect & PAGE_GUARD) &&
                                regionSize >= sizeof(CameraCache);
         if (scannable) {

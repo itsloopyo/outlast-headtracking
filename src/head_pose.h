@@ -25,6 +25,18 @@ struct Lean {
     }
 };
 
+// Cuts the frame's lean to what the level leaves room for, and returns the fraction of
+// it to keep, in [0, 1]. `cleanEye` is where the game itself put the camera and
+// `worldOffset` is the lean the tracker asked for, in world units, so the two together
+// are the segment to test. A null function is the clamp switched off, which is what the
+// mod ships until the trace behind it has been confirmed in a running game.
+//
+// A fraction rather than a vector because the policy only ever shortens the lean along
+// its own direction, and returning the scale keeps the diagnostic components and the
+// world vector in step without either being recomputed from the other.
+using LeanLimitFn = float (*)(void* context, const UE3Vector& cleanEye,
+                              const float worldOffset[3]);
+
 namespace detail {
 
 // Moves the render eye by the frame's positional lean, in the CLEAN orientation basis -
@@ -32,7 +44,7 @@ namespace detail {
 // rotation is composed into it, so a lean follows body facing rather than the
 // head-rotated view. UE3 is left-handed with X forward, Y right, Z up.
 inline void ApplyLean(const FrameSample& s, const UE3Rotator& cleanRot, UE3Vector* outLoc,
-                      Lean* outLean) {
+                      Lean* outLean, LeanLimitFn limit, void* limitContext) {
     // Horizon-locked: forward is FLAT, so the three axes are orthogonal and a lean
     // moves the eye by the amount asked for along the axis asked for. Using the
     // pitched forward instead puts part of a forward lean into world Z, where the
@@ -66,6 +78,19 @@ inline void ApplyLean(const FrameSample& s, const UE3Rotator& cleanRot, UE3Vecto
     outLean->world[0] = right[0] * oR + up[0] * oU + fwd[0] * oF;
     outLean->world[1] = right[1] * oR + up[1] * oU + fwd[1] * oF;
     outLean->world[2] = right[2] * oR + up[2] * oU + fwd[2] * oF;
+
+    // Asked BEFORE the eye moves, from the clean position: a query starting at an eye
+    // that is already inside the wall answers a question about the wrong room. Both the
+    // world vector and the components the diagnostic line reports are cut by what comes
+    // back, so the log describes the lean that was applied rather than the one asked for.
+    if (limit != nullptr) {
+        const float keep = limit(limitContext, *outLoc, outLean->world);
+        for (int i = 0; i < 3; ++i) {
+            outLean->ruf[i] *= keep;
+            outLean->world[i] *= keep;
+        }
+    }
+
     outLoc->X += outLean->world[0];
     outLoc->Y += outLean->world[1];
     outLoc->Z += outLean->world[2];
@@ -100,6 +125,17 @@ inline float BudgetedPitch(std::int32_t cleanPitch, float headPitchDeg) {
 // degrees and already in the engine's convention - see the sign flip in ApplyHeadPose.
 inline void ComposeRotation(bool worldSpaceYaw, float headYaw, float headPitch,
                             float headRoll, UE3Rotator* outRot) {
+    // A pose that names no rotation at all leaves the rotator exactly as the game filled
+    // it in, down to the number. Composing it anyway is arithmetic that cannot move the
+    // camera and can still change the field: the camera-local branch round-trips through
+    // a matrix, and both branches fold. The camera hook decides the pose reached the
+    // frame by comparing these three fields against the game's, so a centred tracker
+    // would otherwise announce itself on the first frame the game's yaw passed a half
+    // turn - and that line is the one thing in the log that says the chain is live.
+    if (DegToUnits(headYaw) == 0 && DegToUnits(headPitch) == 0 && DegToUnits(headRoll) == 0) {
+        return;
+    }
+
     // The budget is exact for the horizon-locked branch below, where the composed pitch IS
     // the sum of the two. It is only an approximation for the camera-local branch, which
     // composes matrices: there the composed elevation is not that sum once the clean camera
@@ -116,10 +152,24 @@ inline void ComposeRotation(bool worldSpaceYaw, float headYaw, float headPitch,
         // Each axis is folded onto its half-turn BEFORE the add. The engine's rotator
         // fields are plain int32 and nothing bounds what the game put there, so adding
         // up to a revolution to a raw one is signed overflow, which is undefined. After
-        // the fold both operands are inside +/-32768 and the sum cannot leave int32.
-        outRot->Yaw   = WrapSigned(outRot->Yaw) + DegToUnits(headYaw);
-        outRot->Roll  = WrapSigned(outRot->Roll) + DegToUnits(headRoll);
-        outRot->Pitch = cleanPitch + DegToUnits(budgetedPitch);
+        // the fold the game's side is inside +/-32768 and the head's inside +/-65536 -
+        // DegToUnits folds onto a whole revolution, not a half one - so the sum is at
+        // most 98303 and cannot leave int32.
+        //
+        // An axis the head did not turn is left ALONE rather than written back folded.
+        // The fold names the same direction, but not the same number, and the game's yaw
+        // accumulates turns without bound: rewriting it would mean a centred tracker
+        // changed the rotator, which is what the camera hook reads as the pose having
+        // moved.
+        if (const std::int32_t yaw = DegToUnits(headYaw)) {
+            outRot->Yaw = WrapSigned(outRot->Yaw) + yaw;
+        }
+        if (const std::int32_t roll = DegToUnits(headRoll)) {
+            outRot->Roll = WrapSigned(outRot->Roll) + roll;
+        }
+        if (const std::int32_t pitch = DegToUnits(budgetedPitch)) {
+            outRot->Pitch = cleanPitch + pitch;
+        }
         return;
     }
 
@@ -135,17 +185,32 @@ inline void ComposeRotation(bool worldSpaceYaw, float headYaw, float headPitch,
     // Passing over the zenith is what the pitch limit exists to stop, and here the budget
     // cannot see it coming - three degrees of head pitch is enough to cross it when the
     // game's own camera is steep and rolled, which is the state the hero's fall at a
-    // chapter start leaves behind while it settles. What a crossing always does is reverse
-    // the horizontal direction the view faces, so that is what is tested, on the matrix
-    // itself rather than on the rotator the round trip folds it into. A head yaw past a
-    // quarter turn reverses it legitimately, so the test stops there.
+    // chapter start leaves behind while it settles.
+    //
+    // What a crossing always does is carry the camera's own up-axis across the horizon,
+    // and row 2 of the matrix IS that axis, so the test is the sign of its world-Z
+    // component against the sign it had. Relative, not absolute: the camera the fall
+    // leaves behind is rolled past upright, its up-axis already points below the horizon,
+    // and a crossing there moves it back ABOVE one. Tested on the matrix rather than on
+    // the rotator, which folds a crossing into a plausible-looking pitch and a reversed
+    // yaw.
+    //
+    // It is NOT tested by comparing which way the two forward axes face. That reverses on
+    // a crossing, but it also reverses without one: camera-local yaw at a steep camera
+    // swings the heading a long way for a small head movement, which is the whole point of
+    // the mode. Measured, with a horizontal-reversal test in this spot: a clean pitch of 70
+    // degrees and a head pitch of 15 threw the pose away from 43 degrees of head yaw, and a
+    // clean pitch of 80 threw it away from 2 - the view snapping back to the game's aim and
+    // sticking there while the lean carried on tracking.
+    //
+    // A head ROLL past a quarter turn would tip the axis across on its own and be read as a
+    // crossing. A neck does not do that, and a tracker sending one has bigger problems than
+    // this branch.
     //
     // The frame then keeps the game's own rotator. Holding at the limit instead would mean
     // solving for the head angle that reaches it, and this is a state the camera is passing
     // through rather than sitting in.
-    const float alignment = clean.m[0][0] * composed.m[0][0] +
-                            clean.m[0][1] * composed.m[0][1];
-    if (alignment < 0.0f && std::fabs(headYaw) < 90.0f) {
+    if ((composed.m[2][2] < 0.0f) != (clean.m[2][2] < 0.0f)) {
         return;
     }
 
@@ -166,7 +231,8 @@ inline void ComposeRotation(bool worldSpaceYaw, float headYaw, float headPitch,
 // game. Returns false with the viewpoint untouched and the lean zero when the pose is not
 // a finite number; saying so is the caller's job.
 inline bool ApplyHeadPose(bool worldSpaceYaw, const FrameSample& s, UE3Vector* outLoc,
-                          UE3Rotator* outRot, Lean* outLean) {
+                          UE3Rotator* outRot, Lean* outLean,
+                          LeanLimitFn leanLimit = nullptr, void* leanContext = nullptr) {
     // Written through the out-parameter rather than copied out at each return: with three
     // exits, the copy is a line one of them eventually forgets, and a missing lean reaches
     // the reticle as the previous frame's parallax correction.
@@ -192,7 +258,7 @@ inline bool ApplyHeadPose(bool worldSpaceYaw, const FrameSample& s, UE3Vector* o
     // The lean goes in FIRST, while outRot still holds the clean rotation it has to be
     // resolved against.
     if (s.has_position) {
-        detail::ApplyLean(s, *outRot, outLoc, outLean);
+        detail::ApplyLean(s, *outRot, outLoc, outLean, leanLimit, leanContext);
     }
     if (s.has_rotation) {
         detail::ComposeRotation(worldSpaceYaw, headYaw, headPitch, headRoll, outRot);

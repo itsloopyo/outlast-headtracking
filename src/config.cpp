@@ -75,6 +75,23 @@ void WritePositionSection(cameraunlock::IniWriter& w) {
     w.WriteDouble("LimitYDown", kPosLimitYDown);
     w.WriteDouble("LimitZ", kPosLimitZ);
     w.WriteDouble("LimitZBack", kPosLimitZBack);
+    w.WriteComment(" Hold the leaned view out of walls. The limits above keep the eye");
+    w.WriteComment(" inside your body; this keeps it inside the room. It asks the game's");
+    w.WriteComment(" own line check where the wall is on every frame your head is off");
+    w.WriteComment(" centre, and it is off until that has been watched working in a real");
+    w.WriteComment(" level - turn it on and HeadTracking.log reports what it found.");
+    w.WriteBool("CollisionEnabled", kCollisionEnabled);
+    w.WriteComment(" How far off a surface the view is held, in the game's units (100 to");
+    w.WriteComment(" the metre). Below about 10 the surface stops being drawn before the");
+    w.WriteComment(" view stops moving, and you see through it anyway.");
+    w.WriteDouble("CollisionMargin", kCollisionMargin);
+    w.WriteComment(" Which things the check stops on, as the game's own trace mask. The");
+    w.WriteComment(" default is the mask the crosshair trace uses, so it currently stops");
+    w.WriteComment(" on characters as well as on walls.");
+    w.WriteHex("CollisionChannel", kCollisionChannel);
+    w.WriteComment(" How smoothly the lean opens back up once you step clear, 0 (instant)");
+    w.WriteComment(" to 1 (slow). Closing it is always instant.");
+    w.WriteDouble("CollisionReleaseSmoothing", kCollisionRelease);
     w.WriteBlankLine();
 }
 
@@ -99,10 +116,11 @@ void WriteDiagnosticsSection(cameraunlock::IniWriter& w) {
     w.WriteComment(" address space and sets a CPU watchpoint across every thread in the");
     w.WriteComment(" game, and the findings go to HeadTracking.log. It is the one thing here");
     w.WriteComment(" that still runs on a game build this mod does not recognise, because");
-    w.WriteComment(" that is what it is for. Leave it false otherwise.");
+    w.WriteComment(" that is what it is for. Leave it 0 otherwise.");
     w.WriteBool("CameraProbe", kCameraProbe);
-    w.WriteComment(" Report which light the game enables when the camcorder's night vision");
-    w.WriteComment(" goes on, and what it is pointed at. Diagnostic; leave it false.");
+    w.WriteComment(" Reports the lights near the player, and how far each one points from");
+    w.WriteComment(" where the game aims and from the view you are looking along. A");
+    w.WriteComment(" diagnostic tool; leave it 0.");
     w.WriteBool("LightProbe", kLightProbe);
     w.WriteComment(" Log the reticle target, camera position and screen offset once a second.");
     w.WriteBool("AimProbe", kAimProbe);
@@ -315,6 +333,18 @@ void ReadPositionSection(const cameraunlock::IniReader& ini, Config& cfg) {
     cfg.pos_limit_y_down = ReadPositionLimit(ini, "LimitYDown", cfg.pos_limit_y);
     cfg.pos_limit_z = ReadPositionLimit(ini, "LimitZ", kPosLimitZ);
     cfg.pos_limit_z_back = ReadPositionLimit(ini, "LimitZBack", kPosLimitZBack);
+
+    cfg.collision_enabled = ini.ReadBool("Position", "CollisionEnabled", kCollisionEnabled);
+    // Checked on the same terms as the limits: the margin is subtracted from a distance
+    // and a NaN or a negative one would let the eye through the surface it is meant to
+    // stop short of, which is the one thing the clamp exists to prevent.
+    cfg.collision_margin = ReadSanitized(
+        ini, "Position", "CollisionMargin", kCollisionMargin,
+        [](float v) { return SanitizePositionLimit(v, kCollisionMargin); });
+    cfg.collision_release_smoothing = ReadSanitized(
+        ini, "Position", "CollisionReleaseSmoothing", kCollisionRelease,
+        [](float v) { return SanitizeSmoothing(v, kCollisionRelease); });
+    cfg.collision_channel = ini.ReadHex("Position", "CollisionChannel", kCollisionChannel);
 }
 
 void ReadHotkeysSection(const cameraunlock::IniReader& ini, Config& cfg) {

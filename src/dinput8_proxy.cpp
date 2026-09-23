@@ -52,7 +52,23 @@ void LoadRealDInput() {
 // whole init-thread structure exists to avoid.
 FARPROC Resolve(const char* name) {
     std::call_once(g_loadOnce, LoadRealDInput);
-    return g_real ? GetProcAddress(g_real, name) : nullptr;
+    if (!g_real) {
+        return nullptr;
+    }
+    const FARPROC fn = GetProcAddress(g_real, name);
+    if (!fn) {
+        // Once, not per call: the game asks again on every device it opens. Without this
+        // line the whole failure is silent - the log shows a clean startup, the player
+        // has no keyboard or mouse, and nothing connects the two.
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            cameraunlock::logging::Line(
+                "ERROR: the system dinput8.dll loaded but exports no %s (error %lu). Input "
+                "is dead until this mod is uninstalled.", name, GetLastError());
+        }
+    }
+    return fn;
 }
 
 // What the forwarder returns when the real DLL is not there. Not a silent S_OK: a caller

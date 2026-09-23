@@ -59,12 +59,18 @@ void TrackingRuntime::Start(const Config& cfg) {
         Log::Line("UDP: %s", msg.c_str());
     });
 
-    // LAST, and with a release. The camera detour is already installed by the time this
-    // runs, so the render thread is free to enter SampleFrame the instant this reads
-    // true - and the first thing it does there is read m_cfg, which is a plain struct
-    // written at the top of this function. A relaxed store publishes no ordering, so
-    // that read would be a data race on non-atomic memory; the release pairs with the
-    // acquire in SampleFrame and makes every write above visible before it.
+    // With a release, and AFTER everything the render thread reads without a lock. The
+    // camera detour is already installed by the time this runs, so that thread is free to
+    // enter SampleFrame the instant this reads true - and the first thing it does there is
+    // read m_cfg, which is a plain struct written at the top of this function. A relaxed
+    // store publishes no ordering, so that read would be a data race on non-atomic memory;
+    // the release pairs with the acquire in SampleFrame and makes every write ABOVE IT
+    // visible before it.
+    //
+    // Above it is the operative half. The receiver and the link monitor start below,
+    // deliberately: both are self-synchronising and neither is read off a plain field by
+    // the render thread. Anything added below this line that IS must move above it, or it
+    // is published by nothing.
     m_enabled.store(m_cfg.enabled_on_startup, std::memory_order_release);
 
     // Core's receiver keeps its own supervisor thread on the port for as long as the
@@ -242,6 +248,7 @@ FrameSample TrackingRuntime::SampleFrame() {
     // view snaps to the new pose instead of blending back to it. That is the snap the
     // hold exists to prevent, moved to the other end of the gap.
     const float dt = m_clock.Tick();
+    m_lastDt = dt;
 
     // A tracker that has gone quiet holds its last pose instead of snapping the view
     // back to the game's camera. The face leaving the webcam for half a second, or two

@@ -27,7 +27,9 @@ constexpr bool  kWorldSpaceYaw   = true;
 constexpr bool  kCenterWindow    = true;
 
 // Render the game at a different field of view. 0 is the shipped default and means the
-// game's own, which is also the only value that installs no hook at all.
+// game's own angle is drawn unchanged. It does NOT mean the hook is absent: the same
+// detour is what reads the live angle the zoom correction is measured against, so it goes
+// in either way and at 0 it simply passes the game's answer straight back.
 constexpr float kFovOverride     = 0.0f;
 // The angles the mod will accept for it. Narrower than the range a projection can
 // physically express, because a number outside this is a typo rather than a preference,
@@ -61,6 +63,32 @@ constexpr float kPosLimitY       = cameraunlock::PositionSettings{}.limit_y;
 constexpr float kPosLimitYDown   = cameraunlock::PositionSettings{}.limit_y_down;
 constexpr float kPosLimitZ       = cameraunlock::PositionSettings{}.limit_z;
 constexpr float kPosLimitZBack   = cameraunlock::PositionSettings{}.limit_z_back;
+
+// Hold the leaned eye out of the level's geometry. Shipped OFF, and it stays off until a
+// log from a running game shows it engaging on real walls at the right distance: it calls
+// into the engine's own line check on every frame the head is off centre, and an
+// unverified trace mask either blocks on nothing or blocks on everything.
+constexpr bool  kCollisionEnabled = false;
+
+// How far off a blocking surface the eye is held, in the engine's centimetres. It has to
+// EXCEED the near clip distance or the clamp buys nothing: geometry closer to the eye
+// than the near plane is not drawn, so a wall held inside it is still see-through. This
+// build's CalcSceneView builds its projection with MinZ 10.0, so 15 leaves a margin over
+// it. (.lab/NOTES.md records the measurement.)
+constexpr float kCollisionMargin = 15.0f;
+
+// The engine's own trace mask for the check. The reticle's mask is the only one this
+// build is known to use, so the clamp starts from it rather than from a narrower one
+// nothing here has confirmed - which also means it currently stops on characters as well
+// as on walls. A key rather than a constant because that is the number to try and read
+// back out of the log when the feature is verified.
+constexpr int   kCollisionChannel = 0x20BF;
+
+// How quickly the allowance reopens once an obstruction clears, on the same 0-1 scale as
+// every other smoothing value here. 0.9 is a 200ms time constant. Tightening is never
+// smoothed - easing INTO a smaller allowance would leave the eye inside the wall for the
+// length of the ease, which is the whole bug.
+constexpr float kCollisionRelease = 0.9f;
 }  // namespace defaults
 
 struct Config {
@@ -98,6 +126,13 @@ struct Config {
 
     // 6DOF positional tracking.
     bool  position_enabled = defaults::kPositionEnabled;
+
+    // Cut the lean to what the level leaves room for, so the eye is not pushed inside a
+    // wall. Off until it has been confirmed in a running game - see the defaults above.
+    bool  collision_enabled = defaults::kCollisionEnabled;
+    float collision_margin = defaults::kCollisionMargin;
+    int   collision_channel = defaults::kCollisionChannel;
+    float collision_release_smoothing = defaults::kCollisionRelease;
     float pos_limit_x = defaults::kPosLimitX;
     // Vertical travel is clamped as [-pos_limit_y_down, +pos_limit_y]. The two are
     // separate keys because a player sitting down has less room to duck than to

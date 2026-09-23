@@ -47,6 +47,7 @@ set(MOD_SOURCES
     src/game_module.cpp
     src/game_state.cpp
     src/hotkeys.cpp
+    src/lean_trace.cpp
     src/light_hook.cpp
     src/light_probe.cpp
     src/path_utils.cpp

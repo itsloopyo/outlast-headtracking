@@ -106,6 +106,7 @@ ThreadIdSet SetWatchpointOnAllThreads(uintptr_t address, bool enable, WatchMode 
             HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
                                        FALSE, te.th32ThreadID);
             if (!thread) continue;
+            bool armed = false;
             SuspendThread(thread);
             CONTEXT ctx;
             ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
@@ -120,12 +121,18 @@ ThreadIdSet SetWatchpointOnAllThreads(uintptr_t address, bool enable, WatchMode 
                     ctx.Dr7 &= ~kDr7Bp0Mask;
                 }
                 ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
-                if (SetThreadContext(thread, &ctx)) {
-                    result.push_back(te.th32ThreadID);
-                }
+                armed = SetThreadContext(thread, &ctx) != FALSE;
             }
             ResumeThread(thread);
             CloseHandle(thread);
+            // Recorded AFTER the resume. push_back can grow the vector, which takes the
+            // process heap lock, and the thread suspended a few lines above is a game
+            // thread that allocates routinely. Taking that lock while its owner is frozen
+            // is a deadlock with no log line and no crash: the game hangs, in the one
+            // session the probe was turned on to diagnose something else.
+            if (armed) {
+                result.push_back(te.th32ThreadID);
+            }
         } while (Thread32Next(snap, &te));
     }
     CloseHandle(snap);

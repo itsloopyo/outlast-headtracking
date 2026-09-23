@@ -16,7 +16,14 @@ bool ReadPeFingerprint(std::uintptr_t base, PeFingerprint& out) {
     }
     IMAGE_NT_HEADERS nt{};
     if (!cameraunlock::memory::SafeRead(base + dos.e_lfanew, nt) ||
-        nt.Signature != IMAGE_NT_SIGNATURE) {
+        nt.Signature != IMAGE_NT_SIGNATURE ||
+        // IMAGE_NT_HEADERS is the 64-bit form here, so a 32-bit image's optional header
+        // is a different shape and SizeOfImage and CheckSum would be read out of fields
+        // that are not them. The two numbers that come back look ordinary, which is the
+        // problem: the module range is then wrong by whatever those bytes happened to
+        // say. The game is x64 (CMakeLists refuses a Win32 build), so this is the
+        // boundary saying so rather than a case being handled.
+        nt.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
         return false;
     }
     out.timeDateStamp = nt.FileHeader.TimeDateStamp;

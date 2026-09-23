@@ -150,7 +150,7 @@ const char* Describe(GameplayState state) {
 void InitGameState(const GameStateTargets& targets) {
     g_targets = targets;
     Log::Line("Gameplay gate armed: GWorld @ 0x%p, bIsMenuLevel at AWorldInfo+0x%zX bit "
-              "0x%X, read off the streaming-persistent level wherever there is one.",
+              "0x%zX, read off the streaming-persistent level wherever there is one.",
               reinterpret_cast<void*>(targets.gWorld), targets.offWorldInfoFlags,
               targets.maskIsMenuLevel);
 }

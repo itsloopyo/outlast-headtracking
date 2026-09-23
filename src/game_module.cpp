@@ -20,6 +20,7 @@ GameModule HostGameModule() {
     GameModule range;
     range.base = base;
     range.end  = base + headers.sizeOfImage;
+    range.fingerprint = headers;
     return range;
 }
 

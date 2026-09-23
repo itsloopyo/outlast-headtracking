@@ -189,6 +189,12 @@ void ReportWritersOfDirection(std::uintptr_t light) {
 // direction the frame is drawn along.
 void ReportLights(const GameModule& module, const FoundLight* lights, std::size_t count,
                   const UE3Rotator& clean, const UE3Rotator& drawn) {
+    // A sample that found nothing says nothing, and until the camcorder is raised that is
+    // every sample there is: reporting them anyway costs a line a second for the ten
+    // minutes the probe runs, which buries the handful of lines it exists to produce.
+    if (count == 0) {
+        return;
+    }
     // Row 0 of an FRotationMatrix is the world-space forward axis (ue3_rotation.h), so
     // the aim direction comes from the same composition the camera hook and the crosshair
     // projection use rather than from a second copy of it here.

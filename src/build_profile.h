@@ -78,8 +78,13 @@ struct OffsetTable {
     // The dword of AWorldInfo bitfields that carries bIsMenuLevel, and the bit of it
     // that is that flag. Both are the build's, not the engine's: which dword a bool
     // lands in and which bit of it moves whenever a bool is added above it.
-    std::size_t   offWorldInfoFlags;
-    std::uint32_t maskIsMenuLevel;
+    //
+    // The mask is a dword in the game and a std::size_t here so that EVERY member of
+    // this struct is pointer-width. A narrower member leaves padding, and padding is a
+    // place a new member can be inserted without changing sizeof - which is the one
+    // thing the assert below has to notice. Keep new members pointer-width too.
+    std::size_t offWorldInfoFlags;
+    std::size_t maskIsMenuLevel;
 
     // AOLHUD::DrawCrosshair, the native the HUD's own Draw dispatches to for the dot in
     // the middle of the screen.
@@ -112,6 +117,10 @@ struct OffsetTable {
 // and the mod hooks a wrong address. Nothing else catches that: it is not a type error and
 // the compiler has nothing to say about it. This does, and the fix when it fires is to
 // append the new member rather than to update the number.
+//
+// It only does it while every member is pointer-width. A narrower one leaves padding, and
+// a member inserted into padding shifts every initialiser after it while sizeof stays put
+// - the same silent re-routing, with the one guard against it asleep.
 static_assert(sizeof(OffsetTable) == 30 * sizeof(std::uintptr_t),
               "OffsetTable changed size: append new members at the END, then update this "
               "count and add the new value to the end of every profile in the registry.");

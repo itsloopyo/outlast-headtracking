@@ -100,23 +100,14 @@ bool InstallEngineHooks() {
     const OffsetTable& offsets = ActiveProfile().offsets;
     const uintptr_t base = module.base;
 
-    // The field-of-view hook goes in FIRST. It is what decides the angle the scene view
-    // is then built from, so installing it second would leave the first frames reporting
-    // a projection the override had not reached yet - and it is also what publishes the
-    // zoom factor the camera hook scales the pose by, from the same CalcSceneView a few
-    // instructions earlier.
-    const FovHookTargets fovTargets = { base + offsets.rvaGetFovAngle,
-                                        base + offsets.rvaSceneViewFovReturn };
-    InstallFovHook(fovTargets, g_config);
-
-    // Before the camera hook, and not only for the field of view: this is what marks the
-    // CalcSceneView call that is drawing, which is half of what picks the frame's
-    // viewpoint out of the ones script asked for.
-    InstallSceneViewHook(base + offsets.rvaCalcSceneView,
-                         base + offsets.rvaDrawSceneViewReturn);
-
-    // Armed before the camera hook is enabled, because the detour asks it on every frame
-    // it runs for, starting with the first.
+    // The gameplay gate is armed FIRST, before any detour is enabled. Every hook here
+    // publishes its own targets before MinHook enables it, which makes the enable the
+    // moment they become visible to the render thread; this table is the one that is
+    // shared, and the field-of-view detour below asks it a question on the first frame it
+    // runs for. Armed afterwards, that read races the init thread's write - a plain
+    // twelve-member struct, half of it published - and the answer it gets is a walk
+    // through a partly-filled chain. The reads are guarded so it cannot fault; what it
+    // produces is a wrong answer on the one frame the zoom basis is latched from.
     const GameStateTargets stateTargets = { base + offsets.rvaGWorld,
                                             base + offsets.rvaLevelStreamingPersistentClass,
                                             offsets.offWorldPersistentLevel,
@@ -131,10 +122,32 @@ bool InstallEngineHooks() {
                                             offsets.maskIsMenuLevel };
     InitGameState(stateTargets);
 
+    // The field-of-view hook goes in before the scene-view and camera hooks. It is what
+    // decides the angle the scene view is then built from, so installing it later would
+    // leave the first frames reporting a projection the override had not reached yet -
+    // and it is also what publishes the zoom factor the camera hook scales the pose by,
+    // from the same CalcSceneView a few instructions earlier.
+    const FovHookTargets fovTargets = { base + offsets.rvaGetFovAngle,
+                                        base + offsets.rvaSceneViewFovReturn };
+    InstallFovHook(fovTargets, g_config);
+
+    // Before the camera hook, and not only for the field of view: this is what marks the
+    // CalcSceneView call that is drawing, which is half of what picks the frame's
+    // viewpoint out of the ones script asked for.
+    //
+    // Fatal, because it is the only thing that ever sets that mark. Without it the camera
+    // detour filters out every frame there is, so carrying on would install three more
+    // hooks, start the light probe on the strength of a camera hook that can never fire,
+    // and end with a log that says four hooks went in and a game with no head tracking.
+    if (!InstallSceneViewHook(base + offsets.rvaCalcSceneView,
+                              base + offsets.rvaDrawSceneViewReturn)) {
+        return false;
+    }
+
     InitCameraTrace(base, offsets);
     const CameraHookTargets cameraTargets = { base + offsets.rvaGetPlayerViewPoint,
                                               base + offsets.rvaSceneViewViewPointReturn };
-    if (!InstallCameraHook(cameraTargets, *g_tracking, g_config.aim_probe)) {
+    if (!InstallCameraHook(cameraTargets, *g_tracking, g_config)) {
         return false;
     }
     // Fed by the same frame the camera hook publishes, so it goes in after it: the light

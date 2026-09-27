@@ -2,14 +2,14 @@
 // Copyright (c) 2026 itsloopyo
 
 // Characterization tests for the boundary checks a user-editable INI passes through
-// (config_sanitize.h) and for the field-of-view decision (fov_override.h). Both are
+// (legacy_config/config_sanitize.h) and for the field-of-view decision (fov_override.h). Both are
 // pure functions of their arguments, and both are the last thing between a typo in a
 // text file and a black or unusable frame.
 
 #include "test_support.h"
 
 #include "config.h"
-#include "config_sanitize.h"
+#include "legacy_config/config_sanitize.h"
 #include "fov_override.h"
 
 #include <cmath>
@@ -19,6 +19,10 @@
 namespace {
 
 using namespace OutlastHeadTracking;
+using legacy::ClampRange;
+using legacy::SanitizeFinite;
+using legacy::SanitizePositionLimit;
+using legacy::SanitizeSmoothing;
 using olht_tests::Check;
 using olht_tests::NearEqual;
 

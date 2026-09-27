@@ -22,14 +22,15 @@ setup = { cmd = """
 build         = { cmd = "cmake --build build --config Debug",   depends-on = ["setup"] }
 build-release = { cmd = "cmake --build build --config Release", depends-on = ["setup"] }
 
-# The mod's own tests. They cover the pure logic - rotator arithmetic, head-pose
-# composition, config boundary checks, the field-of-view decision and the camera-cache
-# predicates - so they need neither the game nor a running process. Their own build
-# directory, because the mod target writes bin/Release/dinput8.dll and a test build
-# sharing `build` would overwrite whatever `pixi run package` had just produced.
+# The mod's own tests: the pure logic - rotator arithmetic, head-pose composition, the
+# field-of-view decision and the camera-cache predicates - and the config differential test,
+# which runs the published dev build's reader against the frozen one in src/legacy_config.
+# None of it needs the game or a running process. Their own build directory, because the mod
+# target writes bin/Release/dinput8.dll and a test build sharing `build` would overwrite
+# whatever `pixi run package` had just produced.
 setup-tests = { cmd = "cmake -B build-tests -A x64 -DOLHT_BUILD_TESTS=ON" }
-build-tests = { cmd = "cmake --build build-tests --config Release --target OutlastHeadTrackingTests", depends-on = ["setup-tests"] }
-test        = { cmd = "ctest --test-dir build-tests -C Release --output-on-failure", depends-on = ["build-tests"] }
+build-tests = { cmd = "cmake --build build-tests --config Release --target OutlastHeadTrackingTests config_differential_tests", depends-on = ["setup-tests"] }
+test        = { cmd = "ctest --test-dir build-tests -C Release --output-on-failure --no-tests=error", depends-on = ["build-tests"] }
 
 deploy  = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Debug",   depends-on = ["build"] }
 install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build-release"] }

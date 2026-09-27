@@ -45,3 +45,6 @@
 *.asi binary
 *.pdb binary
 *.lib binary
+
+# Test data holding the bytes a build wrote, CRLF included.
+tests/config_differential/data/** -text

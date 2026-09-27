@@ -42,6 +42,7 @@ set(MOD_SOURCES
     src/camera_trace.cpp
     src/camera_probe.cpp
     src/config.cpp
+    src/legacy_config/legacy_config.cpp
     src/data_watchpoint.cpp
     src/fov_override.cpp
     src/game_module.cpp

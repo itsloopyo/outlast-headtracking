@@ -74,8 +74,8 @@ there is no mod loader to install first.
 
 The Nexus ZIP already has that layout, so it can be extracted straight over the
 game folder. To remove a manual install, delete `dinput8.dll`,
-`HeadTracking.ini`, `HeadTracking.log` and `HeadTracking.prev.log` from that
-same folder.
+`HeadTracking.log` and `HeadTracking.prev.log` from that same folder, and
+`CameraUnlock.ini` too if you do not want to keep your settings.
 
 ## Setting Up OpenTrack
 
@@ -122,7 +122,9 @@ address the packet came from rather than by which machine it came from.
 
 ## Controls
 
-Two equivalent binding sets - use whichever your keyboard has:
+Two equivalent binding sets by default - use whichever your keyboard has. Each
+action's keys are a list in `CameraUnlock.ini` (see Configuration), so either
+can be rebound:
 
 | Action              | Nav-cluster | Chord           |
 |---------------------|-------------|-----------------|
@@ -146,76 +148,139 @@ sends, so centring in one place is the whole of it.
 
 ## Configuration
 
-Settings live in `HeadTracking.ini`, written next to `OLGame.exe` in
-`Binaries\Win64\` the first time the mod runs. Any key you leave out falls back
-to its default, so an INI from an older build keeps working - the one exception
-is `LimitYDown`, which follows whatever `LimitY` is set to when it is absent, so
-that raising one raises both. All of them are read at startup.
+<!-- cameraunlock:config -->
+The mod reads its settings from `Binaries\Win64\CameraUnlock.ini` in the game folder, and creates the file when it starts and finds none. Edit it with any text editor.
 
-The block below lists every key with its shipped default. The generated file also
-carries a comment above each setting explaining what it does; those are abridged here.
+A setting set to `default` takes its value from `Defaults.ini`, which every head tracking mod that keeps its settings in `CameraUnlock.ini` reads. Head tracking mods that keep their settings in another file do not read it. Writing a value in place of `default` changes that setting for this game only. When the mod saves a setting that a hotkey changed in game, it writes the new value in place of `default`, so that setting no longer follows `Defaults.ini` in this game until you set it to `default` again.
+
+`Defaults.ini` is `%AppData%\CameraUnlock\Defaults.ini` on Windows; `$XDG_CONFIG_HOME/CameraUnlock/Defaults.ini` on Linux, or `~/.config/CameraUnlock/Defaults.ini` where `XDG_CONFIG_HOME` is not set, under Wine and Proton too; and `~/Library/Application Support/CameraUnlock/Defaults.ini` on macOS. The mod's log, where it writes one, names the file it read.
+
+When the mod starts and finds no `Defaults.ini`, it creates one holding the built-in values, unless Windows runs the game as a packaged app. The mod never changes `Defaults.ini` after that. Edit it with any text editor.
+
+The built-in value of each setting set to `default` below:
+
+- `UdpPort=4242`
+- `EnableOnStartup=true`
+- `WorldSpaceYaw=true`
+- `RotationEnabled=true`
+- `DataFreshnessMs=500`
+- `LocalSmoothing=0.0`
+- `RemoteSmoothing=0.15`
+- `PositionEnabled=true`
+- `PositionLimitX=0.3`
+- `PositionLimitY=0.2`
+- `PositionLimitYDown=0.2`
+- `PositionLimitZ=0.4`
+- `PositionLimitZBack=0.1`
+- `CollisionEnabled=true`
+- `CollisionReleaseSmoothing=0.9`
+- `ToggleKey=End, Ctrl+Shift+Y`
+- `CycleTrackingModeKey=PageUp, Ctrl+Shift+G`
+- `YawModeKey=PageDown, Ctrl+Shift+H`
+
+With every setting at its default, the file reads:
 
 ```ini
+; Outlast head tracking settings.
+; Comments start with ; and go on their own line. Text after a value is part of the value.
+; Hotkeys are key names such as End, PageUp or Ctrl+Shift+Y. Separate several with commas; leave empty for none.
+; A setting set to default takes its value from Defaults.ini, which every head tracking mod
+; that keeps its settings in CameraUnlock.ini reads: %AppData%\CameraUnlock\Defaults.ini on
+; Windows, $XDG_CONFIG_HOME/CameraUnlock/Defaults.ini (normally ~/.config/CameraUnlock) on
+; Linux, under Wine and Proton too, and ~/Library/Application Support/CameraUnlock/Defaults.ini
+; on macOS. The log names the file it read. Write a value instead of default to change that
+; setting for this game only.
+
+[CameraUnlock]
+; Written by the mod. Leave this section in place.
+ConfigFormat=1
+
+[Network]
+; UDP port the mod receives tracker data on (OpenTrack protocol).
+UdpPort=default
+
 [General]
-EnableOnStartup=true
-Port=4242
-DataFreshnessMs=500
-; Yaw mode: true = horizon-locked yaw (default), false = camera-local.
-WorldSpaceYaw=true
-; Keep the game window centred on its monitor. Outlast centres it once, while
-; the splash movies play, and then resizes it for the menu without moving it,
-; which leaves it off centre for the rest of the session. A window that fills
-; the screen is left alone.
+; true: head tracking is on when the game starts. ToggleKey turns it on and off.
+EnableOnStartup=default
+; true: yaw turns around the world's up axis. false: around the camera's own up axis.
+WorldSpaceYaw=default
+; true: turning your head turns the view.
+; Tracking mode at startup, with PositionEnabled. The mode hotkey changes both.
+RotationEnabled=default
+; Milliseconds a tracker packet stays current. Once the tracker has sent nothing
+; for this long, the mod stops following it until data arrives again.
+DataFreshnessMs=default
+; Keep the game window centred on its monitor. Outlast centres it once, while the
+; splash movies play, then resizes it for the menu without moving it. A window
+; that fills the screen is left alone.
 CenterWindow=true
 
-[View]
-; Field of view in degrees, or 0 for the game's own.
-FieldOfView=0.0
-
 [Smoothing]
-; Smoothing 0.0 (responsive) - 1.0 (heavy). Covers rotation and position.
-; The value is picked per connection from the packet source address:
-; LocalSmoothing for a tracker sending to 127.0.0.1 on this PC,
-; RemoteSmoothing for a phone or other device on the network.
-LocalSmoothing=0.0
-RemoteSmoothing=0.15
+; Smoothing when the tracker runs on this PC. 0 is the least, 1 the most.
+LocalSmoothing=default
+; Smoothing when the tracker is another device on the network, such as a phone.
+; 0 is the least, 1 the most.
+RemoteSmoothing=default
 
 [Position]
-; 6DOF positional tracking. The pose is used at 1:1 - shape it in your tracker,
-; not here. The limits below are metres of head travel, not a sensitivity.
-Enabled=true
-LimitX=0.3
-; Vertical travel is clamped to [-LimitYDown, +LimitY]: how far the view
-; may rise and how far it may drop, as separate metre budgets.
-LimitY=0.2
-LimitYDown=0.2
-LimitZ=0.4
-LimitZBack=0.1
+; true: moving your head moves the view.
+; Tracking mode at startup, with RotationEnabled. The mode hotkey changes both.
+PositionEnabled=default
+; How far, in metres, leaning left or right can move the view.
+PositionLimitX=default
+; How far, in metres, raising your head can move the view.
+PositionLimitY=default
+; How far, in metres, lowering your head can move the view.
+PositionLimitYDown=default
+; How far, in metres, leaning forward can move the view.
+PositionLimitZ=default
+; How far, in metres, leaning back can move the view.
+PositionLimitZBack=default
+; true: leaning stops at walls instead of moving the view through them.
+CollisionEnabled=default
+; How far, in centimetres, the view is held off a wall when you lean into it.
+; Below about 10 the wall stops being drawn before the view stops moving.
+CollisionMargin=15.0
+; The game's own trace mask the wall check uses. 8383 is 0x20BF, the mask
+; the crosshair trace uses, so the check also stops on characters.
+; CollisionChannel=8383
+; How gently the view eases back out after a wall stopped a lean.
+; 0 is the quickest, 1 the slowest.
+CollisionReleaseSmoothing=default
 
 [Hotkeys]
-; Virtual-key codes. Defaults: End (toggle), Page Up (cycle tracking mode),
-; Page Down (yaw mode).
-Toggle=0x23
-CycleMode=0x21
-YawMode=0x22
-; Chord alternatives: Ctrl+Shift+Y (toggle), Ctrl+Shift+G (cycle tracking mode),
-; Ctrl+Shift+H (yaw mode). Set one false to drop that chord.
-ChordToggle=true
-ChordCycleMode=true
-ChordYawMode=true
+; Turns head tracking on and off.
+ToggleKey=default
+; Changes the tracking mode: rotation and position, rotation only, position only.
+CycleTrackingModeKey=default
+; Switches yaw between the world's up axis and the camera's own (WorldSpaceYaw).
+YawModeKey=default
+
+[View]
+; Field of view in degrees, 0 or 20 to 170. 0 keeps the game's own. Outlast has no
+; field-of-view setting; this is the mod rendering the frame at a different angle,
+; as a ratio against the camera's unzoomed angle, so raising the camcorder and
+; running still change the view by the same proportion.
+FieldOfView=0.0
 
 [Diagnostics]
-; Scans memory for the camera record and reports what writes and reads it, into
-; HeadTracking.log. A diagnostic tool; leave it false.
+; Find the live camera record by scanning memory and report what writes and reads
+; it to HeadTracking.log. A diagnostic tool that sets a CPU watchpoint in every
+; game thread. Leave it false.
 CameraProbe=false
-; Reports the lights the player is carrying, and how far each one points from
-; where the game aims and from the view you are looking along. A diagnostic
-; tool; leave it false.
+; Report the lights near the player to HeadTracking.log. A diagnostic tool; leave
+; it false.
 LightProbe=false
+; Log the reticle target, camera position and screen offset once a second.
+; A diagnostic tool; leave it false.
+AimProbe=false
 ```
+<!-- /cameraunlock:config -->
 
-`Page Down` / `Ctrl+Shift+H` flips the yaw mode for the rest of the session
-without a restart; the INI decides which mode you start in.
+`Page Up` / `Ctrl+Shift+G` and `Page Down` / `Ctrl+Shift+H` save the mode they
+switch to in `CameraUnlock.ini`, so the next start begins in it. `End` /
+`Ctrl+Shift+Y` changes the session only; `EnableOnStartup` decides whether
+tracking is on at the next start.
 
 ### The camcorder's light
 
@@ -248,7 +313,7 @@ change what the game draws: on a 16:9 display 90 renders a 96.0 by 64.0 degree
 frame and 100 renders 105.9 by 73.4. The mod reads whatever you set, so head
 tracking stays the right size either way.
 
-`FieldOfView` in `HeadTracking.ini` is the mod's own, and it works differently.
+`FieldOfView` in `CameraUnlock.ini` is the mod's own, and it works differently.
 It is applied as a ratio against the game's unzoomed angle, so a sprint still
 widens the view and raising the camcorder still zooms it, both by the proportion
 they always did; `RunningFOV` is a separate line in the game's file and does not
@@ -290,11 +355,11 @@ change. `HeadTracking.log` prints the numbers it works from once per session.
 
 - In OpenTrack, confirm **Output** is UDP to `127.0.0.1` port `4242` and that
   you have pressed **Start**.
-- Confirm `Port` in `HeadTracking.ini` matches the port your tracker sends to.
+- Confirm `UdpPort` in `CameraUnlock.ini` matches the port your tracker sends to.
 - If the log says the port could not be opened, another program already had it
   when Outlast started - usually a head tracking mod in a game you left running.
   Close that game and tracking starts about half a second later on its own; you
-  do not need to restart Outlast or touch the INI. The line above it in the log
+  do not need to restart Outlast or touch the config. The line above it in the log
   is the reason Windows gave, verbatim.
 - Press `End` or `Ctrl+Shift+Y`; tracking may have been toggled off.
 - The front-end menu is not the game. The mod holds the pose off there and
@@ -321,14 +386,15 @@ change. `HeadTracking.log` prints the numbers it works from once per session.
 
 ## Updating
 
-Download the new release and run `install.cmd` again. Your config is preserved.
+Download the new release and run `install.cmd` again. Your settings are kept.
 
 ## Uninstalling
 
-Run `uninstall.cmd`. It removes `dinput8.dll`, `HeadTracking.ini`,
-`HeadTracking.log` and `HeadTracking.prev.log` from `Binaries\Win64\`, and
-restores any `dinput8.dll` that
-was already there before the mod was installed. This mod ships no separate mod
+Run `uninstall.cmd`. It removes `dinput8.dll`, `HeadTracking.log` and
+`HeadTracking.prev.log` from `Binaries\Win64\`, and restores any `dinput8.dll`
+that was already there before the mod was installed. It leaves
+`CameraUnlock.ini` and any `HeadTracking.ini` an older version left in place, so
+a reinstall keeps your settings. This mod ships no separate mod
 loader, so `uninstall.cmd /force`, which exists to remove a loader the
 installer did not put there, has nothing extra to do here.
 

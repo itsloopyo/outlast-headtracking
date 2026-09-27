@@ -5,10 +5,13 @@
 
 #include "logging.h"
 
-#include "cameraunlock/input/chord_hotkeys.h"
+#include "cameraunlock/input/key_binding_registration.h"
+#include "cameraunlock/input/key_bindings.h"
 
-#include <cstdio>
 #include <exception>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace OutlastHeadTracking {
 
@@ -19,28 +22,25 @@ namespace {
 // mod relies on is visible at the call site rather than in another repository.
 constexpr int kPollIntervalMs = 16;
 
-// Room for "0x" and two hex digits, or the word "unbound", and the terminator.
-constexpr int kKeyNameChars = 8;
+// The config table already refused a list that does not parse, so one here is a bug rather
+// than a player's typo.
+std::vector<cameraunlock::input::KeyBinding> Parse(const std::string& list) {
+    cameraunlock::input::KeyBindingsParseResult parsed = cameraunlock::input::ParseKeyBindings(list);
+    if (!parsed.ok()) throw std::logic_error("hotkey list '" + list + "' does not parse: " + parsed.error);
+    return parsed.bindings;
+}
 
 }  // namespace
 
 bool Hotkeys::Start(const Config& cfg, Action onToggle, Action onCycleMode,
                     Action onYawMode) {
-    using cameraunlock::input::ChordGuarded;
-    using cameraunlock::input::NavGuarded;
-
-    // Nav-cluster keys are suppressed while Ctrl+Shift is held so the chord
-    // path is the sole trigger for Ctrl+Shift+<nav> combos - a single keypress
-    // never fires an action twice.
-    m_poller.SetToggleKey(cfg.vk_toggle, NavGuarded(onToggle));
-    m_poller.AddHotkey(cfg.vk_cycle_mode, NavGuarded(onCycleMode));
-    m_poller.AddHotkey(cfg.vk_yaw_mode, NavGuarded(onYawMode));
-
-    // Chord alternatives (Ctrl+Shift+Y / Ctrl+Shift+G / Ctrl+Shift+H) on the same
-    // poller; ChordGuarded gates each action on the modifier state.
-    if (cfg.chord_toggle)     m_poller.AddHotkey('Y', ChordGuarded(std::move(onToggle)));
-    if (cfg.chord_cycle_mode) m_poller.AddHotkey('G', ChordGuarded(std::move(onCycleMode)));
-    if (cfg.chord_yaw_mode)   m_poller.AddHotkey('H', ChordGuarded(std::move(onYawMode)));
+    // One registration per key: a binding without modifiers stays quiet while Ctrl and Shift
+    // are both held, so Ctrl+Shift with a key reaches only a binding that names it, and one
+    // press never fires an action twice.
+    using cameraunlock::input::RegisterKeyBindings;
+    RegisterKeyBindings(m_poller, Parse(cfg.toggle_key_name), std::move(onToggle));
+    RegisterKeyBindings(m_poller, Parse(cfg.cycle_tracking_mode_key_name), std::move(onCycleMode));
+    RegisterKeyBindings(m_poller, Parse(cfg.yaw_mode_key_name), std::move(onYawMode));
 
     // The poller rethrows rather than failing silently when the thread cannot be
     // created. This entry point is reached from a __stdcall thread procedure, where an
@@ -58,20 +58,9 @@ bool Hotkeys::Start(const Config& cfg, Action onToggle, Action onCycleMode,
         return false;
     }
 
-    // 0 is the poller's unbind sentinel, so a key set to 0 in the INI never fires. Printed
-    // as "unbound" rather than as 0x00, which reads like a successful binding and is
-    // indistinguishable from a broken poller.
-    const auto keyName = [](unsigned key, char* out) -> const char* {
-        if (key == 0) {
-            return "unbound";
-        }
-        std::snprintf(out, kKeyNameChars, "0x%02X", key);
-        return out;
-    };
-    char toggle[kKeyNameChars], cycle[kKeyNameChars], yaw[kKeyNameChars];
-    Log::Line("Hotkeys: toggle=%s cyclemode=%s yawmode=%s",
-              keyName(cfg.vk_toggle, toggle), keyName(cfg.vk_cycle_mode, cycle),
-              keyName(cfg.vk_yaw_mode, yaw));
+    Log::Line("Hotkeys: toggle=[%s] cycle mode=[%s] yaw mode=[%s]",
+              cfg.toggle_key_name.c_str(), cfg.cycle_tracking_mode_key_name.c_str(),
+              cfg.yaw_mode_key_name.c_str());
 
     return true;
 }

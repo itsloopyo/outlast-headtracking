@@ -48,3 +48,6 @@
 
 # Test data holding the bytes a build wrote, CRLF included.
 tests/config_differential/data/** -text
+
+# The committed config holds the bytes the mod creates, CRLF included.
+config/CameraUnlock.ini -text

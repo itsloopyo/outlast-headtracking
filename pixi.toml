@@ -29,8 +29,12 @@ build-release = { cmd = "cmake --build build --config Release", depends-on = ["s
 # target writes bin/Release/dinput8.dll and a test build sharing `build` would overwrite
 # whatever `pixi run package` had just produced.
 setup-tests = { cmd = "cmake -B build-tests -A x64 -DOLHT_BUILD_TESTS=ON" }
-build-tests = { cmd = "cmake --build build-tests --config Release --target OutlastHeadTrackingTests config_differential_tests", depends-on = ["setup-tests"] }
+build-tests = { cmd = "cmake --build build-tests --config Release --target OutlastHeadTrackingTests config_differential_tests config_tests", depends-on = ["setup-tests"] }
 test        = { cmd = "ctest --test-dir build-tests -C Release --output-on-failure --no-tests=error", depends-on = ["build-tests"] }
+
+# Rewrite config/CameraUnlock.ini, the committed copy of the CameraUnlock.ini the mod creates at
+# first launch, from the config table after a change to a row, a comment or a default.
+render-config = { cmd = "build-tests/tests/Release/config_tests.exe --render-config config/CameraUnlock.ini && node cameraunlock-core/scripts/encode-seed.mjs", depends-on = ["build-tests"] }
 
 deploy  = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Debug",   depends-on = ["build"] }
 install = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/deploy.ps1 Release", depends-on = ["build-release"] }

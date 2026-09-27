@@ -123,33 +123,30 @@ void ConfiguredFovRangeIsNarrowerThanTheRenderableOne() {
 }
 
 void ShippedDefaults() {
-    // A default-constructed Config, a freshly written INI and a read of a missing key all
-    // have to agree, which they do by naming the same constants.
-    const Config cfg;
-    Check(cfg.udp_port == defaults::kPort, "the shipped port is the OpenTrack standard");
-    Check(cfg.udp_port == 4242, "which is 4242");
-    // Against the literals from the doctrine table, not against the constants the Config
-    // is initialised FROM - `cfg.local_smoothing == defaults::kLocalSmoothing` is x == x
-    // and passes whatever core's defaults drift to. A remote default that had moved to
-    // 0.9 would give every phone tracker a ten-second time constant, silently.
+    // Against the literals from the doctrine table, not against the constants the table is
+    // initialised FROM. A remote default that had moved to 0.9 would give every phone tracker
+    // a ten-second time constant, silently.
+    const Config cfg = MakeConfigTable().defaults();
+    Check(cfg.udp_port == 4242, "the shipped port is the OpenTrack standard 4242");
     Check(cfg.local_smoothing == 0.0f, "local smoothing defaults to 0.0, with no floor");
     Check(cfg.remote_smoothing == 0.15f, "and remote smoothing to 0.15");
     Check(cfg.local_smoothing < cfg.remote_smoothing,
           "a same-machine tracker is smoothed less than one over the network");
     Check(cfg.world_space_yaw, "yaw is horizon-locked by default");
-    Check(cfg.position_enabled, "6DOF position is on by default");
-    Check(!cfg.camera_probe, "the camera probe is off in every shipped INI");
+    Check(cfg.rotation_enabled && cfg.position_enabled, "rotation and 6DOF position are on by default");
+    Check(!cfg.camera_probe, "the camera probe is off by default");
     Check(cfg.fov_override == 0.0f, "and the frame is drawn at the game's own angle");
-    Check(cfg.vk_toggle == 0x23 && cfg.vk_cycle_mode == 0x21 && cfg.vk_yaw_mode == 0x22,
-          "the nav-cluster bindings are End, Page Up and Page Down");
-    Check(cfg.pos_limit_z > cfg.pos_limit_z_back,
+    Check(cfg.toggle_key_name == "End, Ctrl+Shift+Y" && cfg.cycle_tracking_mode_key_name == "PageUp, Ctrl+Shift+G" &&
+              cfg.yaw_mode_key_name == "PageDown, Ctrl+Shift+H",
+          "the bindings are End, Page Up and Page Down with their Ctrl+Shift chords");
+    Check(cfg.position.limit_z > cfg.position.limit_z_back,
           "there is more room to lean in than to pull back");
     // Values, not just their ordering: an ordering check passes with LimitZ at 0.12 m.
-    Check(cfg.pos_limit_x == 0.30f, "the lateral lean limit is 0.30 m either side");
-    Check(cfg.pos_limit_y == 0.20f, "the upward lean limit is 0.20 m");
-    Check(cfg.pos_limit_y_down == 0.20f, "the downward one is its own field at 0.20 m");
-    Check(cfg.pos_limit_z == 0.40f, "leaning in reaches 0.40 m");
-    Check(cfg.pos_limit_z_back == 0.10f, "and pulling back is held to 0.10 m");
+    Check(cfg.position.limit_x == 0.30f, "the lateral lean limit is 0.30 m either side");
+    Check(cfg.position.limit_y == 0.20f, "the upward lean limit is 0.20 m");
+    Check(cfg.position.limit_y_down == 0.20f, "the downward one is its own field at 0.20 m");
+    Check(cfg.position.limit_z == 0.40f, "leaning in reaches 0.40 m");
+    Check(cfg.position.limit_z_back == 0.10f, "and pulling back is held to 0.10 m");
 }
 
 }  // namespace

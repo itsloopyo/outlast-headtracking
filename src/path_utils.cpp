@@ -15,7 +15,7 @@ namespace {
 // address known to live inside this DLL, whatever the loader mapped it at.
 void ThisModuleAnchor() {}
 
-// Narrows a path for the core APIs that take std::string.
+// Narrows a path for the legacy reader, which opens the file through the ANSI profile API.
 //
 // CP_UTF8 (and CP_UTF7) reject a non-null lpUsedDefaultChar and any dwFlags outright
 // with ERROR_INVALID_PARAMETER, so asking for lossiness reporting on a system with the
@@ -92,24 +92,18 @@ std::wstring GetModulePathW(const char* filename) {
     return wide;
 }
 
-std::string GetModulePath(const char* filename) {
-    const std::wstring dir = GetModuleDirectoryW();
-    if (dir.empty()) {
+std::string LegacyAnsiPath(const std::wstring& path) {
+    const size_t lastSlash = path.find_last_of(L"\\/");
+    if (lastSlash == std::wstring::npos) {
         return {};
     }
+    const std::wstring dir = path.substr(0, lastSlash + 1);
 
     std::string narrowDir;
     if (!NarrowPath(dir, &narrowDir)) {
-        // The install path has characters the ANSI codepage cannot spell, so the narrow
-        // form would name a different directory - one containing '?'. The 8.3 alias is
-        // the same path written in ASCII, which is why it is tried rather than treated
-        // as a failure: a Cyrillic or CJK Steam library is a normal install.
-        //
-        // Aliased on the DIRECTORY, which always exists. GetShortPathNameW resolves each
-        // component on disk, so pointing it at the file would fail with
-        // ERROR_FILE_NOT_FOUND on the very first launch - before the INI has been
-        // written - and the INI is only ever written after this returns. That is a
-        // fallback that could never once have fired.
+        // The folder has characters the ANSI codepage cannot spell, so the narrow form would
+        // name a different directory - one containing '?'. The pre-canonical builds took the
+        // 8.3 alias of the DIRECTORY instead, which always exists, and so does the import.
         std::vector<wchar_t> shortDir(MAX_PATH);
         for (;;) {
             const DWORD written = GetShortPathNameW(dir.c_str(), shortDir.data(),
@@ -123,17 +117,18 @@ std::string GetModulePath(const char* filename) {
             shortDir.resize(written + 1);
         }
         if (!NarrowPath(std::wstring(shortDir.data()), &narrowDir)) {
-            // 8.3 alias generation is off for this volume, so the path has no ASCII
-            // spelling. Returning the bare filename instead would send
-            // GetPrivateProfileString to the Windows directory, to read someone else's
-            // file as this mod's config.
+            // 8.3 alias generation is off for this volume, so the path has no ASCII spelling
+            // and those builds did not start.
             return {};
         }
     }
 
-    // The filename is an ASCII literal from this file, so appending it after the
-    // conversion keeps it out of the codepage question entirely.
-    return narrowDir + filename;
+    // The file name is the ASCII kLegacyConfigFileName, so narrowing it is a byte-for-byte copy.
+    std::string ansi = narrowDir;
+    for (size_t i = lastSlash + 1; i < path.size(); ++i) {
+        ansi.push_back(static_cast<char>(path[i]));
+    }
+    return ansi;
 }
 
 }  // namespace OutlastHeadTracking

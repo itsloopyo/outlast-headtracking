@@ -85,9 +85,9 @@ $instStaging = Join-Path $stagingRoot 'installer'
 New-Item -ItemType Directory -Path $instStaging | Out-Null
 
 # Payload. install-body-shim.cmd copies plugins\* into the game's exe directory,
-# which for Outlast is Binaries\Win64\. HeadTracking.ini is not seeded: the mod
-# writes it there itself on first run, and shipping a copy would reset every key
-# the user tuned on the next update.
+# which for Outlast is Binaries\Win64\. No config is shipped: the mod creates
+# CameraUnlock.ini there at first launch, importing HeadTracking.ini once where an
+# older build left one, and a shipped copy would stop that import after an update.
 $pluginsDir = Join-Path $instStaging 'plugins'
 New-Item -ItemType Directory -Path $pluginsDir | Out-Null
 Copy-Item -LiteralPath $modDll -Destination (Join-Path $pluginsDir 'dinput8.dll') -Force

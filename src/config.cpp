@@ -4,190 +4,200 @@
 #include "config.h"
 
 #include "legacy_config/legacy_config.h"
-#include "logging.h"
+#include "path_utils.h"
 
-#include "cameraunlock/config/ini_reader.h"
+#include "cameraunlock/config/head_tracking_config_table.h"
+#include "cameraunlock/input/key_bindings.h"
+#include "cameraunlock/tracking/tracking_mode.h"
 
-#include <windows.h>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace OutlastHeadTracking {
 
 namespace {
 
-// The defaults live in config.h so the writer below and Config's own member
-// initialisers name the same constant.
-using namespace defaults;
+using cameraunlock::config::DroppedValue;
+using cameraunlock::config::ImportResult;
+using cameraunlock::config::LegacyInput;
+using cameraunlock::input::KeyModifiers;
 
-bool FileExists(const char* path) {
-    return GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES;
-}
+constexpr const char* kFovExpectation = "0, or an angle from 20 to 170";
 
-void WriteGeneralSection(cameraunlock::IniWriter& w) {
-    w.WriteSection("General");
-    w.WriteBool("EnableOnStartup", kEnableOnStartup);
-    w.WriteInt("Port", kPort);
-    w.WriteInt("DataFreshnessMs", kDataFreshnessMs);
-    w.WriteComment(" Yaw mode: true = horizon-locked yaw (default), false = camera-local.");
-    w.WriteBool("WorldSpaceYaw", kWorldSpaceYaw);
-    w.WriteComment(" Keep the game window centred on its monitor. Outlast centres it once,");
-    w.WriteComment(" while the splash movies play, and then resizes it for the menu without");
-    w.WriteComment(" moving it, which leaves it off centre for the rest of the session. A");
-    w.WriteComment(" window that fills the screen is left alone.");
-    w.WriteBool("CenterWindow", kCenterWindow);
-    w.WriteBlankLine();
-}
-
-void WriteViewSection(cameraunlock::IniWriter& w) {
-    w.WriteSection("View");
-    w.WriteComment(" Field of view in degrees, or 0 for the game's own. Outlast has no");
-    w.WriteComment(" field-of-view setting; this is the mod rendering the frame at a");
-    w.WriteComment(" different angle. It is applied as a ratio against the camera's");
-    w.WriteComment(" unzoomed angle, so raising the camcorder and running still change the");
-    w.WriteComment(" view by the same proportion they always did, and it changes the frame");
-    w.WriteComment(" only - what the game reaches for, and every script that asks it the");
-    w.WriteComment(" same question, keep the game's own answer.");
-    w.WriteDouble("FieldOfView", kFovOverride);
-    w.WriteBlankLine();
-}
-
-void WriteSmoothingSection(cameraunlock::IniWriter& w) {
-    w.WriteSection("Smoothing");
-    w.WriteComment(" Smoothing 0.0 (responsive) - 1.0 (heavy). Covers rotation and position.");
-    w.WriteComment(" The value is picked per connection from the packet source address:");
-    w.WriteComment(" LocalSmoothing for a tracker sending to 127.0.0.1 on this PC,");
-    w.WriteComment(" RemoteSmoothing for a phone or other device on the network.");
-    w.WriteDouble("LocalSmoothing", kLocalSmoothing);
-    w.WriteDouble("RemoteSmoothing", kRemoteSmoothing);
-    w.WriteBlankLine();
-}
-
-void WritePositionSection(cameraunlock::IniWriter& w) {
-    w.WriteSection("Position");
-    w.WriteComment(" 6DOF positional tracking. The pose is used at 1:1 - shape it in your tracker,");
-    w.WriteComment(" not here. The limits below are metres of head travel, not a sensitivity.");
-    w.WriteBool("Enabled", kPositionEnabled);
-    w.WriteDouble("LimitX", kPosLimitX);
-    w.WriteComment(" Vertical travel is clamped to [-LimitYDown, +LimitY]: how far the view");
-    w.WriteComment(" may rise and how far it may drop, as separate metre budgets.");
-    w.WriteDouble("LimitY", kPosLimitY);
-    w.WriteDouble("LimitYDown", kPosLimitYDown);
-    w.WriteDouble("LimitZ", kPosLimitZ);
-    w.WriteDouble("LimitZBack", kPosLimitZBack);
-    w.WriteComment(" Hold the leaned view out of walls. The limits above keep the eye");
-    w.WriteComment(" inside your body; this keeps it inside the room. It asks the game's");
-    w.WriteComment(" own line check where the wall is on every frame your head is off");
-    w.WriteComment(" centre, and it is off until that has been watched working in a real");
-    w.WriteComment(" level - turn it on and HeadTracking.log reports what it found.");
-    w.WriteBool("CollisionEnabled", kCollisionEnabled);
-    w.WriteComment(" How far off a surface the view is held, in the game's units (100 to");
-    w.WriteComment(" the metre). Below about 10 the surface stops being drawn before the");
-    w.WriteComment(" view stops moving, and you see through it anyway.");
-    w.WriteDouble("CollisionMargin", kCollisionMargin);
-    w.WriteComment(" Which things the check stops on, as the game's own trace mask. The");
-    w.WriteComment(" default is the mask the crosshair trace uses, so it currently stops");
-    w.WriteComment(" on characters as well as on walls.");
-    w.WriteHex("CollisionChannel", kCollisionChannel);
-    w.WriteComment(" How smoothly the lean opens back up once you step clear, 0 (instant)");
-    w.WriteComment(" to 1 (slow). Closing it is always instant.");
-    w.WriteDouble("CollisionReleaseSmoothing", kCollisionRelease);
-    w.WriteBlankLine();
-}
-
-void WriteHotkeysSection(cameraunlock::IniWriter& w) {
-    w.WriteSection("Hotkeys");
-    w.WriteComment(" Virtual-key codes. Defaults: End (toggle), Page Up (cycle tracking mode), Page Down (yaw mode).");
-    w.WriteComment(" Set one to 0 to leave that action unbound; its chord below still works.");
-    w.WriteHex("Toggle", kVkToggle);
-    w.WriteHex("CycleMode", kVkCycleMode);
-    w.WriteHex("YawMode", kVkYawMode);
-    w.WriteComment(" Chord alternatives: Ctrl+Shift+Y (toggle), Ctrl+Shift+G (cycle tracking mode), Ctrl+Shift+H (yaw mode).");
-    w.WriteBool("ChordToggle", kChord);
-    w.WriteBool("ChordCycleMode", kChord);
-    w.WriteBool("ChordYawMode", kChord);
-    w.WriteBlankLine();
-}
-
-void WriteDiagnosticsSection(cameraunlock::IniWriter& w) {
-    w.WriteSection("Diagnostics");
-    w.WriteComment(" Find the live camera record by scanning memory, and report what writes");
-    w.WriteComment(" and reads it. This is a diagnostic tool: a pass walks the whole");
-    w.WriteComment(" address space and sets a CPU watchpoint across every thread in the");
-    w.WriteComment(" game, and the findings go to HeadTracking.log. It is the one thing here");
-    w.WriteComment(" that still runs on a game build this mod does not recognise, because");
-    w.WriteComment(" that is what it is for. Leave it 0 otherwise.");
-    w.WriteBool("CameraProbe", kCameraProbe);
-    w.WriteComment(" Reports the lights near the player, and how far each one points from");
-    w.WriteComment(" where the game aims and from the view you are looking along. A");
-    w.WriteComment(" diagnostic tool; leave it 0.");
-    w.WriteBool("LightProbe", kLightProbe);
-    w.WriteComment(" Log the reticle target, camera position and screen offset once a second.");
-    w.WriteBool("AimProbe", kAimProbe);
-}
-
-// Returns false when the file could not be created, so the caller reports the real
-// reason. Failing silently here surfaces one step later as "Failed to open INI",
-// which reads as a corrupt file rather than a directory the game cannot write to.
-bool WriteDefaultIni(const char* path) {
-    cameraunlock::IniWriter w;
-    if (!w.Open(path)) {
-        Log::Line("ERROR: could not create %s (error %lu). The mod cannot store its "
-                  "settings; check that the game directory is writable.",
-                  path, GetLastError());
-        return false;
+// A legacy hotkey code and its Ctrl+Shift chord switch as one key list: the code's binding,
+// then the chord.
+std::string KeyList(int vk, bool chord, char letter, const char* key, std::vector<DroppedValue>& dropped) {
+    std::string list = cameraunlock::config::LegacyVirtualKeyToBindings(vk, "Hotkeys", key, dropped);
+    if (chord) {
+        const std::string chordKey =
+            cameraunlock::input::FormatKeyBindings({{KeyModifiers::kCtrl | KeyModifiers::kShift, letter}});
+        list += (list.empty() ? "" : ", ") + chordKey;
     }
-    w.WriteComment(" Outlast - Head Tracking configuration");
-    w.WriteComment(" Lives next to OLGame.exe in Binaries/Win64/.");
-    w.WriteBlankLine();
-    WriteGeneralSection(w);
-    WriteViewSection(w);
-    WriteSmoothingSection(w);
-    WritePositionSection(w);
-    WriteHotkeysSection(w);
-    WriteDiagnosticsSection(w);
-    w.Close();
-    return true;
+    return list;
+}
+
+ImportResult Import(const LegacyInput& input, Config& out) {
+    // The published build opened the file by the ANSI path it built itself, not the one the
+    // owner derives, so the import builds it the same way.
+    const std::string ansiPath = LegacyAnsiPath(input.path);
+    if (ansiPath.empty()) {
+        return ImportResult::Refused(
+            "its folder has no ANSI or short-name spelling, so the version that wrote this file could not "
+            "open it and did not start");
+    }
+
+    legacy::Config c;
+    const legacy::ReadResult read = c.Read(ansiPath.c_str());
+    if (read.status == legacy::ReadStatus::Refused) {
+        return ImportResult::Refused(read.reason);
+    }
+
+    std::vector<DroppedValue> dropped;
+
+    out.enable_on_startup = c.enabled_on_startup;
+    out.udp_port = c.udp_port;
+    out.data_freshness_ms = c.data_freshness_ms;
+    out.world_space_yaw = c.world_space_yaw;
+
+    // [Position] Enabled chose only the startup mode: the cycle key reached every mode either
+    // way.
+    const cameraunlock::TrackingModeChannels mode = cameraunlock::EncodeTrackingMode(
+        c.position_enabled ? cameraunlock::TrackingMode::RotationAndPosition
+                           : cameraunlock::TrackingMode::RotationOnly);
+    out.rotation_enabled = mode.rotation_enabled;
+    out.position_enabled = mode.position_enabled;
+
+    out.local_smoothing = c.local_smoothing;
+    out.position.local_smoothing = c.local_smoothing;
+    out.remote_smoothing = c.remote_smoothing;
+    out.position.remote_smoothing = c.remote_smoothing;
+
+    out.position.limit_x = c.pos_limit_x;
+    out.position.limit_y = c.pos_limit_y;
+    out.position.limit_y_down = c.pos_limit_y_down;
+    out.position.limit_z = c.pos_limit_z;
+    out.position.limit_z_back = c.pos_limit_z_back;
+
+    out.collision_enabled = c.collision_enabled;
+    out.lean_clamp.skin = c.collision_margin;
+    out.lean_clamp.release_smoothing = c.collision_release_smoothing;
+    out.collision_channel = c.collision_channel;
+
+    out.fov_override = c.fov_override;
+    out.center_window = c.center_window;
+    out.camera_probe = c.camera_probe;
+    out.light_probe = c.light_probe;
+    out.aim_probe = c.aim_probe;
+
+    out.toggle_key_name = KeyList(c.vk_toggle, c.chord_toggle, 'Y', "Toggle", dropped);
+    out.cycle_tracking_mode_key_name = KeyList(c.vk_cycle_mode, c.chord_cycle_mode, 'G', "CycleMode", dropped);
+    out.yaw_mode_key_name = KeyList(c.vk_yaw_mode, c.chord_yaw_mode, 'H', "YawMode", dropped);
+
+    // A setting the player never changed from what the published build shipped follows
+    // Defaults.ini, each hotkey its code and its chord switch together.
+    using cameraunlock::config::schema::Concept;
+    const legacy::Config shipped;
+    cameraunlock::config::LegacyFollowsDefaultsIni follows;
+    follows.Setting(Concept::UdpPort, c.udp_port, shipped.udp_port);
+    follows.Setting(Concept::EnableOnStartup, c.enabled_on_startup, shipped.enabled_on_startup);
+    follows.Setting(Concept::DataFreshnessMs, c.data_freshness_ms, shipped.data_freshness_ms);
+    follows.Setting(Concept::WorldSpaceYaw, c.world_space_yaw, shipped.world_space_yaw);
+    follows.TrackingMode(c.position_enabled, shipped.position_enabled);
+    follows.Setting(Concept::LocalSmoothing, c.local_smoothing, shipped.local_smoothing);
+    follows.Setting(Concept::RemoteSmoothing, c.remote_smoothing, shipped.remote_smoothing);
+    follows.Setting(Concept::PositionLimitX, c.pos_limit_x, shipped.pos_limit_x);
+    follows.Setting(Concept::PositionLimitY, c.pos_limit_y, shipped.pos_limit_y);
+    follows.Setting(Concept::PositionLimitYDown, c.pos_limit_y_down, shipped.pos_limit_y_down);
+    follows.Setting(Concept::PositionLimitZ, c.pos_limit_z, shipped.pos_limit_z);
+    follows.Setting(Concept::PositionLimitZBack, c.pos_limit_z_back, shipped.pos_limit_z_back);
+    follows.Setting(Concept::CollisionEnabled, c.collision_enabled, shipped.collision_enabled);
+    follows.Setting(Concept::CollisionReleaseSmoothing, c.collision_release_smoothing,
+                    shipped.collision_release_smoothing);
+    follows.Setting(Concept::ToggleKey, c.vk_toggle == shipped.vk_toggle && c.chord_toggle == shipped.chord_toggle);
+    follows.Setting(Concept::CycleTrackingModeKey,
+                    c.vk_cycle_mode == shipped.vk_cycle_mode && c.chord_cycle_mode == shipped.chord_cycle_mode);
+    follows.Setting(Concept::YawModeKey, c.vk_yaw_mode == shipped.vk_yaw_mode && c.chord_yaw_mode == shipped.chord_yaw_mode);
+
+    return read.status == legacy::ReadStatus::Absent
+               ? ImportResult::Absent(std::move(dropped), {}, follows.Concepts())
+               : ImportResult::Imported(std::move(dropped), {}, follows.Concepts());
 }
 
 }  // namespace
 
-bool Config::LoadOrCreate(const char* iniPath) {
-    if (!FileExists(iniPath) && !WriteDefaultIni(iniPath)) {
-        return false;
+cameraunlock::config::CodecParseResult<float> FovCodec::Parse(std::string_view text) const {
+    cameraunlock::config::CodecParseResult<float> read = angle_.Parse(text);
+    if (read.ok() && read.value != 0.0f && read.value < defaults::kMinFovOverride) {
+        return {0.0f, kFovExpectation};
     }
+    if (!read.ok()) read.error = kFovExpectation;
+    return read;
+}
 
-    legacy::Config read;
-    if (read.Read(iniPath).status == legacy::ReadStatus::Refused) {
-        return false;
+std::string FovCodec::Render(float value) const {
+    if (value != 0.0f && value < defaults::kMinFovOverride) {
+        throw std::invalid_argument("[View] FieldOfView " + std::to_string(value) + " is neither 0 nor 20 to 170");
     }
+    return angle_.Render(value);
+}
 
-    enabled_on_startup = read.enabled_on_startup;
-    udp_port = read.udp_port;
-    local_smoothing = read.local_smoothing;
-    remote_smoothing = read.remote_smoothing;
-    data_freshness_ms = read.data_freshness_ms;
-    fov_override = read.fov_override;
-    world_space_yaw = read.world_space_yaw;
-    center_window = read.center_window;
-    camera_probe = read.camera_probe;
-    light_probe = read.light_probe;
-    aim_probe = read.aim_probe;
-    position_enabled = read.position_enabled;
-    collision_enabled = read.collision_enabled;
-    collision_margin = read.collision_margin;
-    collision_channel = read.collision_channel;
-    collision_release_smoothing = read.collision_release_smoothing;
-    pos_limit_x = read.pos_limit_x;
-    pos_limit_y = read.pos_limit_y;
-    pos_limit_y_down = read.pos_limit_y_down;
-    pos_limit_z = read.pos_limit_z;
-    pos_limit_z_back = read.pos_limit_z_back;
-    vk_toggle = read.vk_toggle;
-    vk_cycle_mode = read.vk_cycle_mode;
-    vk_yaw_mode = read.vk_yaw_mode;
-    chord_toggle = read.chord_toggle;
-    chord_cycle_mode = read.chord_cycle_mode;
-    chord_yaw_mode = read.chord_yaw_mode;
-    return true;
+cameraunlock::config::ConfigTable<Config> MakeConfigTable() {
+    using cameraunlock::config::schema::Concept;
+    cameraunlock::config::ConfigTable<Config> table = cameraunlock::config::HeadTrackingConfigTable<Config>(
+        {Concept::UdpPort, Concept::EnableOnStartup, Concept::DataFreshnessMs, Concept::WorldSpaceYaw,
+         Concept::RotationEnabled, Concept::LocalSmoothing, Concept::RemoteSmoothing, Concept::PositionEnabled,
+         Concept::PositionLimitX, Concept::PositionLimitY, Concept::PositionLimitYDown, Concept::PositionLimitZ,
+         Concept::PositionLimitZBack, Concept::CollisionEnabled, Concept::CollisionMargin,
+         Concept::CollisionChannel, Concept::CollisionReleaseSmoothing, Concept::ToggleKey,
+         Concept::CycleTrackingModeKey, Concept::YawModeKey});
+    table.Select(Concept::WorldSpaceYaw).Writable()
+        .Select(Concept::RotationEnabled).Writable()
+        .Select(Concept::PositionEnabled).Writable();
+    table.Select(Concept::CollisionMargin)
+        .Comment("How far, in centimetres, the view is held off a wall when you lean into it.\n"
+                 "Below about 10 the wall stops being drawn before the view stops moving.");
+    table.Select(Concept::CollisionChannel)
+        .Comment("The game's own trace mask the wall check uses. 8383 is 0x20BF, the mask\n"
+                 "the crosshair trace uses, so the check also stops on characters.");
+    table.Local("General", "CenterWindow", &Config::center_window, cameraunlock::config::BoolCodec(),
+                "Keep the game window centred on its monitor. Outlast centres it once, while the\n"
+                "splash movies play, then resizes it for the menu without moving it. A window\n"
+                "that fills the screen is left alone.");
+    table.Local("View", "FieldOfView", &Config::fov_override, FovCodec{},
+                "Field of view in degrees, 0 or 20 to 170. 0 keeps the game's own. Outlast has no\n"
+                "field-of-view setting; this is the mod rendering the frame at a different angle,\n"
+                "as a ratio against the camera's unzoomed angle, so raising the camcorder and\n"
+                "running still change the view by the same proportion.");
+    table.Local("Diagnostics", "CameraProbe", &Config::camera_probe, cameraunlock::config::BoolCodec(),
+                "Find the live camera record by scanning memory and report what writes and reads\n"
+                "it to HeadTracking.log. A diagnostic tool that sets a CPU watchpoint in every\n"
+                "game thread. Leave it false.");
+    table.Local("Diagnostics", "LightProbe", &Config::light_probe, cameraunlock::config::BoolCodec(),
+                "Report the lights near the player to HeadTracking.log. A diagnostic tool; leave\n"
+                "it false.");
+    table.Local("Diagnostics", "AimProbe", &Config::aim_probe, cameraunlock::config::BoolCodec(),
+                "Log the reticle target, camera position and screen offset once a second.\n"
+                "A diagnostic tool; leave it false.");
+    return table;
+}
+
+cameraunlock::config::LegacyImport<Config> MakeLegacyImport() {
+    return {&Import, legacy::ReadKeys()};
+}
+
+cameraunlock::config::ConfigOwnerOptions<Config> MakeConfigOwnerOptions(const std::wstring& folder,
+                                                                        cameraunlock::config::DefaultsFile defaults) {
+    const auto wide = [](const char* name) { return std::wstring(name, name + std::char_traits<char>::length(name)); };
+    cameraunlock::config::ConfigOwnerOptions<Config> options;
+    options.path = folder + wide(kConfigFileName);
+    options.legacy_path = folder + wide(kLegacyConfigFileName);
+    options.table = MakeConfigTable();
+    options.import = MakeLegacyImport();
+    options.header.display_name = kConfigDisplayName;
+    options.defaults = std::move(defaults);
+    return options;
 }
 
 }  // namespace OutlastHeadTracking

@@ -429,18 +429,15 @@ bool InstallCameraHook(const CameraHookTargets& targets, TrackingRuntime& tracki
     g_sceneViewReturn = reinterpret_cast<void*>(targets.sceneViewReturn);
 
     if (cfg.collision_enabled) {
-        cameraunlock::camera::LeanClampSettings settings;
-        settings.skin = cfg.collision_margin;
-        settings.release_smoothing = cfg.collision_release_smoothing;
-        g_leanClamp.SetSettings(settings);
+        g_leanClamp.SetSettings(cfg.lean_clamp);
         lean_trace::SetTraceFlags(static_cast<unsigned int>(cfg.collision_channel));
         g_leanQuery = &lean_trace::Query;
         Log::Line("Lean clamp on: the view is held %.0f units off whatever the game's own "
                   "line check stops on (mask 0x%X), and the allowance reopens at %.2f.",
-                  cfg.collision_margin, cfg.collision_channel,
-                  cfg.collision_release_smoothing);
+                  cfg.lean_clamp.skin, cfg.collision_channel,
+                  cfg.lean_clamp.release_smoothing);
     } else {
-        Log::Line("Lean clamp off ([Position] CollisionEnabled is 0): a lean is held "
+        Log::Line("Lean clamp off ([Position] CollisionEnabled is false): a lean is held "
                   "inside the configured limits but is not checked against the level, so "
                   "leaning hard into a wall can put the view through it.");
     }

@@ -3,153 +3,104 @@
 
 #pragma once
 
-#include <cstdint>
+#include "cameraunlock/config/config_owner.h"
+#include "cameraunlock/config/config_table.h"
+#include "cameraunlock/config/defaults_file.h"
+#include "cameraunlock/config/head_tracking_config.h"
+#include "cameraunlock/config/legacy_import.h"
+#include "cameraunlock/config/value_codecs.h"
 
-#include "cameraunlock/data/position_settings.h"
-#include "cameraunlock/math/smoothing_utils.h"
+#include <string>
+#include <string_view>
 
 namespace OutlastHeadTracking {
 
-// The shipped defaults, in one place. WriteDefaultIni writes these, LoadOrCreate
-// falls back to them, and Config's members are initialised from them, so a
-// default-constructed Config, a freshly written INI and a read of a key that is
-// missing from the file cannot disagree about what the default is.
+constexpr const char* kConfigFileName = "CameraUnlock.ini";
+// The file every build before the canonical format read, beside kConfigFileName. Imported once
+// while kConfigFileName is absent, and never written.
+constexpr const char* kLegacyConfigFileName = "HeadTracking.ini";
+// The game's name as cameraunlock-core's data/games.json spells it.
+constexpr const char* kConfigDisplayName = "Outlast";
+
 namespace defaults {
-constexpr bool  kEnableOnStartup = true;
-constexpr int   kPort            = 4242;
-constexpr int   kMinPort         = 1024;
-constexpr int   kMaxPort         = 65535;
-constexpr int   kDataFreshnessMs = 500;
-constexpr bool  kWorldSpaceYaw   = true;
-
-// Keep the game's window centred on its monitor. Outlast centres it once, while the
-// splash movies play, and then resizes it for the menu without moving it.
-constexpr bool  kCenterWindow    = true;
-
-// Render the game at a different field of view. 0 is the shipped default and means the
-// game's own angle is drawn unchanged. It does NOT mean the hook is absent: the same
-// detour is what reads the live angle the zoom correction is measured against, so it goes
-// in either way and at 0 it simply passes the game's answer straight back.
-constexpr float kFovOverride     = 0.0f;
-// The angles the mod will accept for it. Narrower than the range a projection can
-// physically express, because a number outside this is a typo rather than a preference,
-// and a typo that reached the renderer would be a black or unusable frame the player
-// then has to guess the cause of.
-constexpr float kMinFovOverride  = 20.0f;
-constexpr float kMaxFovOverride  = 170.0f;
-constexpr float kLocalSmoothing  = static_cast<float>(cameraunlock::math::kDefaultLocalSmoothing);
-constexpr float kRemoteSmoothing = static_cast<float>(cameraunlock::math::kDefaultRemoteSmoothing);
-constexpr int   kVkToggle        = 0x23; // VK_END
-constexpr int   kVkCycleMode     = 0x21; // VK_PRIOR (Page Up)
-constexpr int   kVkYawMode       = 0x22; // VK_NEXT (Page Down)
-constexpr bool  kChord           = true;
-
-// The camera probe is a diagnostic tool, off in every shipped INI. It is what
-// finds the camera record and the code around it on a build whose layout has moved -
-// turned on for one session, then off again.
-constexpr bool  kCameraProbe     = false;
-
-// Report what the game does to its lights when the camcorder is raised and night vision
-// switched on. A diagnostic on the same terms as the camera probe: off in every shipped
-// INI, turned on for one session.
-constexpr bool  kLightProbe      = false;
-
-// Log where the reticle is being placed, once a second. Diagnostic, on the same terms.
-constexpr bool  kAimProbe        = false;
-
-constexpr bool  kPositionEnabled = true;
-constexpr float kPosLimitX       = cameraunlock::PositionSettings{}.limit_x;
-constexpr float kPosLimitY       = cameraunlock::PositionSettings{}.limit_y;
-constexpr float kPosLimitYDown   = cameraunlock::PositionSettings{}.limit_y_down;
-constexpr float kPosLimitZ       = cameraunlock::PositionSettings{}.limit_z;
-constexpr float kPosLimitZBack   = cameraunlock::PositionSettings{}.limit_z_back;
-
-// Hold the leaned eye out of the level's geometry. Shipped OFF, and it stays off until a
-// log from a running game shows it engaging on real walls at the right distance: it calls
-// into the engine's own line check on every frame the head is off centre, and an
-// unverified trace mask either blocks on nothing or blocks on everything.
-constexpr bool  kCollisionEnabled = false;
+// Render the game at a different field of view. 0 means the game's own angle is drawn
+// unchanged. It does NOT mean the hook is absent: the same detour is what reads the live angle
+// the zoom correction is measured against, so it goes in either way and at 0 it simply passes
+// the game's answer straight back.
+constexpr float kFovOverride    = 0.0f;
+// The angles the mod will accept for it. Narrower than the range a projection can physically
+// express, because a number outside this is a typo rather than a preference, and a typo that
+// reached the renderer would be a black or unusable frame the player then has to guess the
+// cause of.
+constexpr float kMinFovOverride = 20.0f;
+constexpr float kMaxFovOverride = 170.0f;
 
 // How far off a blocking surface the eye is held, in the engine's centimetres. It has to
-// EXCEED the near clip distance or the clamp buys nothing: geometry closer to the eye
-// than the near plane is not drawn, so a wall held inside it is still see-through. This
-// build's CalcSceneView builds its projection with MinZ 10.0, so 15 leaves a margin over
-// it. (.lab/NOTES.md records the measurement.)
+// EXCEED the near clip distance or the clamp buys nothing: geometry closer to the eye than the
+// near plane is not drawn, so a wall held inside it is still see-through. This build's
+// CalcSceneView builds its projection with MinZ 10.0, so 15 leaves a margin over it.
 constexpr float kCollisionMargin = 15.0f;
 
-// The engine's own trace mask for the check. The reticle's mask is the only one this
-// build is known to use, so the clamp starts from it rather than from a narrower one
-// nothing here has confirmed - which also means it currently stops on characters as well
-// as on walls. A key rather than a constant because that is the number to try and read
-// back out of the log when the feature is verified.
+// The engine's own trace mask for the check. The reticle's mask is the only one this build is
+// known to use, so the clamp starts from it rather than from a narrower one nothing here has
+// confirmed - which also means it currently stops on characters as well as on walls.
 constexpr int   kCollisionChannel = 0x20BF;
-
-// How quickly the allowance reopens once an obstruction clears, on the same 0-1 scale as
-// every other smoothing value here. 0.9 is a 200ms time constant. Tightening is never
-// smoothed - easing INTO a smaller allowance would leave the eye inside the wall for the
-// length of the ease, which is the whole bug.
-constexpr float kCollisionRelease = 0.9f;
 }  // namespace defaults
 
-struct Config {
-    bool  enabled_on_startup = defaults::kEnableOnStartup;
-    uint16_t udp_port = static_cast<uint16_t>(defaults::kPort);
-
-    // Smoothing is picked per connection from the packet source address: a
-    // tracker on this machine (loopback) uses local_smoothing, a remote network
-    // device uses remote_smoothing. Both cover rotation and position.
-    float local_smoothing = defaults::kLocalSmoothing;
-    float remote_smoothing = defaults::kRemoteSmoothing;
-
-    int  data_freshness_ms = defaults::kDataFreshnessMs;
-
-    // The field of view to render at, in degrees, or 0 for the game's own. Applied as a
-    // ratio against the game's unzoomed angle so the game's own widening and narrowing
-    // survive it, and only on the frame - every raycast, interaction and script that asks
-    // the game the same question keeps the game's answer.
+// Core's config with this game's defaults and its own rows.
+struct Config : cameraunlock::HeadTrackingConfig {
+    // The field of view to render at, in degrees, or 0 for the game's own. Applied as a ratio
+    // against the game's unzoomed angle so the game's own widening and narrowing survive it,
+    // and only on the frame - every raycast, interaction and script that asks the game the same
+    // question keeps the game's answer.
     float fov_override = defaults::kFovOverride;
 
-    // true = horizon-locked (world-space) yaw, false = camera-local yaw.
-    bool world_space_yaw = defaults::kWorldSpaceYaw;
-
     // Re-centre the game's window on its monitor whenever the game resizes it.
-    bool center_window = defaults::kCenterWindow;
+    bool center_window = true;
 
-    // Find the live camera record by memory scan and report what writes and reads it.
-    // Off in every shipped INI: it is a diagnostic tool, it spends several
-    // seconds a pass walking the address space, and it arms a CPU watchpoint.
-    bool  camera_probe = defaults::kCameraProbe;
+    // Find the live camera record by memory scan and report what writes and reads it. A
+    // diagnostic tool: it spends several seconds a pass walking the address space, and it arms
+    // a CPU watchpoint.
+    bool camera_probe = false;
 
     // Watch the game's light and camcorder natives and report what they are handed.
-    bool  light_probe = defaults::kLightProbe;
-    bool  aim_probe = defaults::kAimProbe;
+    bool light_probe = false;
 
-    // 6DOF positional tracking.
-    bool  position_enabled = defaults::kPositionEnabled;
+    // Log where the reticle is being placed, once a second.
+    bool aim_probe = false;
 
-    // Cut the lean to what the level leaves room for, so the eye is not pushed inside a
-    // wall. Off until it has been confirmed in a running game - see the defaults above.
-    bool  collision_enabled = defaults::kCollisionEnabled;
-    float collision_margin = defaults::kCollisionMargin;
-    int   collision_channel = defaults::kCollisionChannel;
-    float collision_release_smoothing = defaults::kCollisionRelease;
-    float pos_limit_x = defaults::kPosLimitX;
-    // Vertical travel is clamped as [-pos_limit_y_down, +pos_limit_y]. The two are
-    // separate keys because a player sitting down has less room to duck than to
-    // stretch up, and mirroring one into the other would hide that.
-    float pos_limit_y = defaults::kPosLimitY;
-    float pos_limit_y_down = defaults::kPosLimitYDown;
-    float pos_limit_z = defaults::kPosLimitZ;
-    float pos_limit_z_back = defaults::kPosLimitZBack;
-
-    int vk_toggle     = defaults::kVkToggle;
-    int vk_cycle_mode = defaults::kVkCycleMode;
-    int vk_yaw_mode   = defaults::kVkYawMode;
-    bool chord_toggle = defaults::kChord;
-    bool chord_cycle_mode = defaults::kChord;
-    bool chord_yaw_mode = defaults::kChord;
-
-    bool LoadOrCreate(const char* iniPath);
+    Config() {
+        lean_clamp.skin = defaults::kCollisionMargin;
+        collision_channel = defaults::kCollisionChannel;
+    }
 };
+
+// [View] FieldOfView: 0, or an angle from kMinFovOverride to kMaxFovOverride.
+class FovCodec {
+public:
+    using Value = float;
+
+    cameraunlock::config::CodecParseResult<float> Parse(std::string_view text) const;
+    // Throws std::invalid_argument for a value Parse would not read back.
+    std::string Render(float value) const;
+    bool Equal(float a, float b) const { return angle_.Equal(a, b); }
+
+private:
+    cameraunlock::config::FloatCodec angle_{0.0f, defaults::kMaxFovOverride};
+};
+
+// The rows of CameraUnlock.ini. Only the tracking mode pair and WorldSpaceYaw are Writable: the
+// mode and yaw hotkeys save the player's choice, and End changes the session only.
+cameraunlock::config::ConfigTable<Config> MakeConfigTable();
+
+// HeadTracking.ini as the builds before the canonical format read it (legacy_config/), mapped
+// into Config.
+cameraunlock::config::LegacyImport<Config> MakeLegacyImport();
+
+// The owner's options for the files in `folder` (with its trailing separator): the settings in
+// CameraUnlock.ini, imported once from HeadTracking.ini. The mod passes DefaultsFile::PerUser()
+// and a test a scratch file.
+cameraunlock::config::ConfigOwnerOptions<Config> MakeConfigOwnerOptions(const std::wstring& folder,
+                                                                        cameraunlock::config::DefaultsFile defaults);
 
 }  // namespace OutlastHeadTracking

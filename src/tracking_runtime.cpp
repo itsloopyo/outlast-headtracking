@@ -6,6 +6,8 @@
 #include "log_once.h"
 #include "logging.h"
 
+#include "cameraunlock/tracking/tracking_mode.h"
+
 #include <chrono>
 #include <cstdint>
 #include <thread>
@@ -31,16 +33,10 @@ std::int64_t ElapsedMs(std::int64_t sinceUs, std::int64_t nowUs) {
 void TrackingRuntime::Start(const Config& cfg) {
     m_cfg = cfg;
 
-    // No sensitivity, deadzone or inversion is set: the core defaults are 1:1 with no
-    // deadzone and no inversion, which is the pose the tracker sent. Shaping it is the
+    // The limits and the smoothing copies come from the config; the sensitivities and
+    // inversions stay at the identity PositionSettings starts with. Shaping the pose is the
     // tracker app's job, so one profile behaves the same in every game.
-    cameraunlock::PositionSettings pos;
-    pos.limit_x = m_cfg.pos_limit_x;
-    pos.limit_y = m_cfg.pos_limit_y;
-    pos.limit_y_down = m_cfg.pos_limit_y_down;
-    pos.limit_z = m_cfg.pos_limit_z;
-    pos.limit_z_back = m_cfg.pos_limit_z_back;
-    m_session.SetPositionSettings(pos);
+    m_session.SetPositionSettings(m_cfg.position);
 
     // One value feeds both the rotation and the position processor - there is no
     // separate position smoothing setting - picked per connection from the
@@ -51,9 +47,10 @@ void TrackingRuntime::Start(const Config& cfg) {
     m_session.SetRemoteSmoothing(m_cfg.remote_smoothing);
 
     m_worldSpaceYaw.store(m_cfg.world_space_yaw, std::memory_order_relaxed);
-    m_session.SetMode(m_cfg.position_enabled
-                          ? cameraunlock::TrackingMode::RotationAndPosition
-                          : cameraunlock::TrackingMode::RotationOnly);
+    // The table never loads a pair that names no mode: it reads both as their defaults
+    // instead.
+    m_session.SetMode(
+        cameraunlock::DecodeTrackingMode(m_cfg.rotation_enabled, m_cfg.position_enabled).value());
 
     m_receiver.SetLog([](const std::string& msg) {
         Log::Line("UDP: %s", msg.c_str());
@@ -71,7 +68,7 @@ void TrackingRuntime::Start(const Config& cfg) {
     // deliberately: both are self-synchronising and neither is read off a plain field by
     // the render thread. Anything added below this line that IS must move above it, or it
     // is published by nothing.
-    m_enabled.store(m_cfg.enabled_on_startup, std::memory_order_release);
+    m_enabled.store(m_cfg.enable_on_startup, std::memory_order_release);
 
     // Core's receiver keeps its own supervisor thread on the port for as long as the
     // mod is loaded: it deliberately binds without SO_REUSEADDR, so a port another
@@ -79,8 +76,8 @@ void TrackingRuntime::Start(const Config& cfg) {
     // it re-attempts every 500ms until that holder exits. A player who starts Outlast
     // over a game they forgot to close gets tracking within about half a second of
     // closing it, without touching the INI or restarting Outlast.
-    if (m_receiver.Start(m_cfg.udp_port)) {
-        Log::Line("UDP receiver listening on port %u", m_cfg.udp_port);
+    if (m_receiver.Start(Port())) {
+        Log::Line("UDP receiver listening on port %u", Port());
     } else {
         // Deliberately says nothing about WHY. The line immediately above this one is
         // core's, and it carries the OS's own account of the failure - the numeric code
@@ -89,7 +86,7 @@ void TrackingRuntime::Start(const Config& cfg) {
         // not running while the real reason sits one line up.
         Log::Line("UDP port %u could not be opened; see the UDP line above for what the "
                   "OS said. Retrying every %dms - tracking starts on its own once the "
-                  "port opens, with no restart needed.", m_cfg.udp_port,
+                  "port opens, with no restart needed.", Port(),
                   cameraunlock::UdpReceiver::kRetryIntervalMs);
     }
 
@@ -164,16 +161,16 @@ void TrackingRuntime::LinkMonitorThread() {
                 // Same rule as the bind line in Start(): core has already written what
                 // the OS said, so this reports the state and not a guess at its cause.
                 Log::Line("UDP port %u is no longer open to us; retrying every %dms "
-                          "(the preceding UDP line has the OS's reason)", m_cfg.udp_port,
+                          "(the preceding UDP line has the OS's reason)", Port(),
                           cameraunlock::UdpReceiver::kRetryIntervalMs);
                 break;
             case Link::BoundSilent:
                 Log::Line("UDP port %u is ours but no tracker packets are arriving. Check "
                           "the tracker app is running and sending to this machine on port "
-                          "%u.", m_cfg.udp_port, m_cfg.udp_port);
+                          "%u.", Port(), Port());
                 break;
             case Link::Receiving:
-                Log::Line("Tracker packets are arriving on UDP port %u%s", m_cfg.udp_port,
+                Log::Line("Tracker packets are arriving on UDP port %u%s", Port(),
                           everReceived ? " again" : "");
                 everReceived = true;
                 break;
@@ -200,12 +197,14 @@ PositionLimits TrackingRuntime::GetPositionLimits() const {
     // written by Start() on another thread, and this is the only other thing on the render
     // thread that reads it.
     (void)m_enabled.load(std::memory_order_acquire);
-    return PositionLimits{ m_cfg.pos_limit_x, m_cfg.pos_limit_y, m_cfg.pos_limit_y_down,
-                           m_cfg.pos_limit_z, m_cfg.pos_limit_z_back };
+    return PositionLimits{ m_cfg.position.limit_x, m_cfg.position.limit_y,
+                           m_cfg.position.limit_y_down, m_cfg.position.limit_z,
+                           m_cfg.position.limit_z_back };
 }
 
-void TrackingRuntime::CycleTrackingMode() {
-    switch (m_session.CycleMode()) {
+cameraunlock::TrackingMode TrackingRuntime::CycleTrackingMode() {
+    const cameraunlock::TrackingMode mode = m_session.CycleMode();
+    switch (mode) {
         case cameraunlock::TrackingMode::RotationAndPosition:
             Log::Line("Tracking mode: rotation + position (6DOF)");
             break;
@@ -216,12 +215,14 @@ void TrackingRuntime::CycleTrackingMode() {
             Log::Line("Tracking mode: position only");
             break;
     }
+    return mode;
 }
 
-void TrackingRuntime::ToggleYawMode() {
+bool TrackingRuntime::ToggleYawMode() {
     const bool prev = m_worldSpaceYaw.load(std::memory_order_relaxed);
     m_worldSpaceYaw.store(!prev, std::memory_order_relaxed);
     Log::Line("Yaw mode: %s", !prev ? "world-space (horizon-locked)" : "camera-local");
+    return !prev;
 }
 
 bool TrackingRuntime::IsPoseFresh() const {

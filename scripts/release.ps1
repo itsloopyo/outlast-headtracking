@@ -92,6 +92,16 @@ try {
 }
 $tag = "v$Version"
 
+# A launcher manifest's config descriptor names the version the canonical config ships in;
+# a release below it would read CameraUnlock.ini on a build the descriptor says predates it.
+# Checked before anything is written. Returns without a check while the repo has no manifest.
+try {
+    Assert-ReleaseNotBelowCanonicalSince -RepoRoot $projectRoot -Version $Version
+} catch {
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
 # --- Step 2: branch, working tree, tag --------------------------------------
 $branch = (& git -C $projectRoot rev-parse --abbrev-ref HEAD).Trim()
 if ($branch -ne 'main') {

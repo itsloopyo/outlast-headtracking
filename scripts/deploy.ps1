@@ -57,4 +57,4 @@ Invoke-DevDeployShim `
 
 Write-Host ''
 Write-Host "Deployed the $Configuration build." -ForegroundColor Green
-Write-Host 'HeadTracking.ini is written next to the game exe by the mod on first run.'
+Write-Host 'CameraUnlock.ini is created next to the game exe by the mod on first run.'

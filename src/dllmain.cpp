@@ -19,11 +19,16 @@
 #include "tracking_runtime.h"
 #include "window_center.h"
 
+#include "cameraunlock/config/config_owner.h"
+#include "cameraunlock/tracking/tracking_mode.h"
+
 #include "MinHook.h"
 
 #include <windows.h>
 
+#include <exception>
 #include <string>
+#include <utility>
 
 #ifndef HEADTRACKING_VERSION
 #error "HEADTRACKING_VERSION must be defined by the build (the version in CMakeLists.txt)"
@@ -43,6 +48,38 @@ CameraProbe g_cameraProbe;
 // nothing, which is the same reasoning as the DLL_PROCESS_DETACH case below.
 TrackingRuntime* g_tracking = nullptr;
 Hotkeys*         g_hotkeys = nullptr;
+
+// The one reader and writer of CameraUnlock.ini, never destroyed for the same reason as the
+// two above. Built and loaded on the init thread before the hotkeys start, and saved through
+// from the hotkey thread afterwards. One game process loads this mod, so one process opens
+// this folder's config.
+cameraunlock::config::ConfigOwner<Config>* g_configOwner = nullptr;
+
+// A save that did not happen has already reached the log through the status sink; the
+// session keeps the state the toggle applied. A save that did can carry a line too, naming a
+// row that stopped following Defaults.ini.
+void LogSave(const cameraunlock::config::ConfigSaveResult& saved) {
+    for (const std::string& line : saved.log) Log::Line("%s", line.c_str());
+    if (saved.status != cameraunlock::config::ConfigSaveStatus::Saved) {
+        Log::Line("WARN: the change applies for this session only.");
+    }
+}
+
+// Each toggle applies its new state first, then saves it. End is not here: it changes the
+// session only, and EnableOnStartup decides the next start.
+void CycleTrackingModeAndSave() {
+    const cameraunlock::TrackingModeChannels channels =
+        cameraunlock::EncodeTrackingMode(g_tracking->CycleTrackingMode());
+    LogSave(g_configOwner->Save([channels](Config& c) {
+        c.rotation_enabled = channels.rotation_enabled;
+        c.position_enabled = channels.position_enabled;
+    }));
+}
+
+void ToggleYawModeAndSave() {
+    const bool worldSpace = g_tracking->ToggleYawMode();
+    LogSave(g_configOwner->Save([worldSpace](Config& c) { c.world_space_yaw = worldSpace; }));
+}
 
 // The two probes are gated differently, because they need different things.
 //
@@ -179,31 +216,45 @@ void ReportSettings(const Config& cfg) {
     Log::Line("Settings: tracking starts %s, yaw is %s, smoothing is %.2f for a tracker on "
               "this machine and %.2f for one reaching it over the network, and a pose "
               "counts as current for %d ms.",
-              cfg.enabled_on_startup ? "enabled" : "disabled",
+              cfg.enable_on_startup ? "enabled" : "disabled",
               cfg.world_space_yaw ? "horizon-locked (world-space)" : "camera-local",
               cfg.local_smoothing, cfg.remote_smoothing, cfg.data_freshness_ms);
-    if (cfg.position_enabled) {
-        Log::Line("Settings: leaning is on, limited to %.2f m either side, %.2f m up and "
-                  "%.2f m down, %.2f m forward and %.2f m back.",
-                  cfg.pos_limit_x, cfg.pos_limit_y, cfg.pos_limit_y_down,
-                  cfg.pos_limit_z, cfg.pos_limit_z_back);
-    } else {
-        Log::Line("Settings: leaning is off ([Position] Enabled is false), so only head "
-                  "rotation reaches the camera.");
-    }
+    Log::Line("Settings: tracking mode starts as %s. Leaning is limited to %.2f m either "
+              "side, %.2f m up and %.2f m down, %.2f m forward and %.2f m back.",
+              cfg.position_enabled ? (cfg.rotation_enabled ? "rotation + position" : "position only")
+                                   : "rotation only",
+              cfg.position.limit_x, cfg.position.limit_y, cfg.position.limit_y_down,
+              cfg.position.limit_z, cfg.position.limit_z_back);
 }
 
 // Everything that touches another module runs here rather than in DllMain: resolving
 // OLGame.exe, detouring it and starting threads all need the loader lock this DLL is
 // holding while its entry point runs.
-DWORD WINAPI InitThread(LPVOID) {
+DWORD InitThreadBody() {
     Log::Line("Outlast Head Tracking " HEADTRACKING_VERSION " starting");
 
-    const std::string iniPath = GetModulePath("HeadTracking.ini");
-    if (iniPath.empty() || !g_config.LoadOrCreate(iniPath.c_str())) {
+    const std::wstring folder = GetModuleDirectoryW();
+    if (folder.empty()) {
+        Log::Line("ERROR: the folder this mod was loaded from could not be read, so there is "
+                  "nowhere to read the settings from. Staying dormant.");
+        return 0;
+    }
+    cameraunlock::config::ConfigOwnerOptions<Config> options =
+        MakeConfigOwnerOptions(folder, cameraunlock::config::DefaultsFile::PerUser());
+    // The log is the only place this mod can tell the player anything.
+    options.status_sink = [](const std::string& message) { Log::Line("WARN: %s", message.c_str()); };
+    g_configOwner = new cameraunlock::config::ConfigOwner<Config>(std::move(options));
+
+    const cameraunlock::config::ConfigLoadResult<Config> loaded = g_configOwner->Load();
+    for (const std::string& line : loaded.log) Log::Line("%s", line.c_str());
+    Log::Line("Config: %s", cameraunlock::config::ConfigLoadStatusName(loaded.status));
+    // The build HeadTracking.ini was written for refused it and stayed dormant, so this one
+    // does the same until the player fixes it.
+    if (loaded.status == cameraunlock::config::ConfigLoadStatus::LegacyRefused) {
         Log::Line("ERROR: configuration could not be loaded. Staying dormant.");
         return 0;
     }
+    g_config = loaded.config;
     ReportSettings(g_config);
 
     if (g_config.center_window) {
@@ -230,9 +281,22 @@ DWORD WINAPI InitThread(LPVOID) {
     g_hotkeys = new Hotkeys();
     g_hotkeys->Start(g_config,
                      [] { g_tracking->ToggleEnabled(); },
-                     [] { g_tracking->CycleTrackingMode(); },
-                     [] { g_tracking->ToggleYawMode(); });
+                     [] { CycleTrackingModeAndSave(); },
+                     [] { ToggleYawModeAndSave(); });
     return 0;
+}
+
+// An exception escaping a thread procedure is std::terminate - the game dying outright with
+// the log stopping mid-startup - and the body can throw: the config owner allocates and
+// refuses a table it cannot render, and the receiver and the hotkey poller each construct a
+// std::thread.
+DWORD WINAPI InitThread(LPVOID) {
+    try {
+        return InitThreadBody();
+    } catch (const std::exception& e) {
+        Log::Line("ERROR: startup stopped part way: %s", e.what());
+        return 0;
+    }
 }
 
 }  // namespace

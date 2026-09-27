@@ -20,14 +20,17 @@ add_executable(OutlastHeadTrackingTests
     log_budget_tests.cpp
     ${CMAKE_SOURCE_DIR}/src/ue3_camera_cache.cpp
     ${CMAKE_SOURCE_DIR}/src/steam_offsets.cpp
+    ${CMAKE_SOURCE_DIR}/src/config.cpp
+    ${CMAKE_SOURCE_DIR}/src/legacy_config/legacy_config.cpp
+    ${CMAKE_SOURCE_DIR}/src/path_utils.cpp
 )
 
 target_include_directories(OutlastHeadTrackingTests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
 )
 
-# For the core headers the mod's own headers include (position_settings.h,
-# smoothing_utils.h, angle_utils.h). Nothing here calls into the library itself.
+# For the core headers the mod's own headers include, and for the config table config.cpp
+# builds.
 target_link_libraries(OutlastHeadTrackingTests PRIVATE cameraunlock)
 
 if(MSVC)
@@ -35,9 +38,6 @@ if(MSVC)
 endif()
 
 add_test(NAME OutlastHeadTrackingTests COMMAND OutlastHeadTrackingTests)
-
-# The frozen legacy reader's sanitizers are tested through config_tests.cpp above; the
-# reader itself is driven by the differential test below.
 
 # The config differential test. The oracle is the newest published build's reader and hotkey
 # registration with the core sources they compiled, copied verbatim into
@@ -76,13 +76,16 @@ target_compile_definitions(outlast_hotkeys_oracle PRIVATE
 
 add_executable(config_differential_tests
     ${OLHT_DIFF_DIR}/differential_tests.cpp
+    ${CMAKE_SOURCE_DIR}/src/config.cpp
     ${CMAKE_SOURCE_DIR}/src/legacy_config/legacy_config.cpp
+    ${CMAKE_SOURCE_DIR}/src/path_utils.cpp
 )
 target_include_directories(config_differential_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${OLHT_DIFF_DIR})
 target_compile_definitions(config_differential_tests PRIVATE
-    OUTLAST_DIFFERENTIAL_DATA="${OLHT_DIFF_DIR}/data")
+    OUTLAST_DIFFERENTIAL_DATA="${OLHT_DIFF_DIR}/data"
+    OUTLAST_COMMITTED_CONFIG="${CMAKE_SOURCE_DIR}/config/CameraUnlock.ini")
 target_link_libraries(config_differential_tests PRIVATE
     cameraunlock outlast_config_oracle outlast_hotkeys_oracle)
 if(MSVC)
@@ -93,3 +96,28 @@ add_test(NAME config_differential_tests COMMAND config_differential_tests)
 # The differential test is only as good as its claim about what it compiled.
 add_test(NAME config_provenance COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${OLHT_DIFF_DIR}/check-provenance.ps1)
+
+# Core's canonical config lint over the committed file and every file the differential test
+# migrated, which it writes beside itself under migrated.
+add_test(NAME config_lint COMMAND node
+    ${OLHT_DIFF_DIR}/lint-migrated.mjs
+    $<TARGET_FILE_DIR:config_differential_tests>/migrated)
+set_tests_properties(config_lint PROPERTIES DEPENDS config_differential_tests)
+
+# The committed config against the table, a first start, the toggles' saves and the legacy
+# file's ANSI path. `--render-config <path>` makes it write the committed file instead
+# (pixi run render-config).
+add_executable(config_tests
+    canonical_config_tests.cpp
+    ${CMAKE_SOURCE_DIR}/src/config.cpp
+    ${CMAKE_SOURCE_DIR}/src/legacy_config/legacy_config.cpp
+    ${CMAKE_SOURCE_DIR}/src/path_utils.cpp
+)
+target_include_directories(config_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(config_tests PRIVATE cameraunlock)
+target_compile_definitions(config_tests PRIVATE
+    OUTLAST_COMMITTED_CONFIG="${CMAKE_SOURCE_DIR}/config/CameraUnlock.ini")
+if(MSVC)
+    target_compile_options(config_tests PRIVATE /W4 /WX /permissive-)
+endif()
+add_test(NAME config_tests COMMAND config_tests)

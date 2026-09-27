@@ -11,6 +11,7 @@
 #include "cameraunlock/tracking/head_tracking_session.h"
 
 #include <atomic>
+#include <cstdint>
 #include <thread>
 
 namespace OutlastHeadTracking {
@@ -37,8 +38,9 @@ public:
     FrameSample SampleFrame();
 
     void ToggleEnabled();
-    void CycleTrackingMode();
-    void ToggleYawMode();
+    // Each returns the state it switched to.
+    cameraunlock::TrackingMode CycleTrackingMode();
+    bool ToggleYawMode();
 
     bool IsWorldSpaceYaw() const { return m_worldSpaceYaw.load(std::memory_order_relaxed); }
 
@@ -80,6 +82,9 @@ private:
     // shipped default comes from; this is what makes a user-chosen window mean
     // anything.
     bool IsPoseFresh() const;
+
+    // The configured port. The table holds it to 1-65535.
+    std::uint16_t Port() const { return static_cast<std::uint16_t>(m_cfg.udp_port); }
 
     // m_held masked by the tracking mode in force right now.
     FrameSample HeldForCurrentMode() const;

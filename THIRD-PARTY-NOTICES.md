@@ -10,7 +10,7 @@ network at runtime.
 
 ## cameraunlock-core
 
-- **Version:** commit `36819655d6ce45d4de121aa03765ea2d2e60b98f`, the submodule pointer this build compiles.
+- **Version:** commit `1ddd4b0130280b7f027a3ff2bb17d57d1f3b857d`, the submodule pointer this build compiles.
 - **License:** `MIT`
 - **Upstream:** https://github.com/itsloopyo/cameraunlock-core
 - **Usage:** The shared head-tracking library - the OpenTrack UDP receiver, pose interpolation and smoothing, and the camera maths this mod's Outlast-specific hooks feed.

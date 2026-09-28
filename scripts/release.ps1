@@ -107,6 +107,18 @@ Write-Host "Current version: $current" -ForegroundColor Gray
 Write-Host "New version:     $Version" -ForegroundColor Green
 Write-Host ''
 
+Write-Host "Running the full test suite..." -ForegroundColor Cyan
+Push-Location $projectRoot
+try {
+    pixi run test
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error: pixi run test failed. Nothing was changed." -ForegroundColor Red
+        exit 1
+    }
+} finally {
+    Pop-Location
+}
+
 # --- Step 3: notices name the core commit this build compiles ---------------
 # THIRD-PARTY-NOTICES.md ships at the root of both ZIPs, so the cameraunlock-core
 # commit it names is the attribution the user receives. Bumping the submodule

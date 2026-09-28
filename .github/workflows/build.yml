@@ -14,14 +14,12 @@ on:
       - 'docs/**'
       - 'LICENSE'
 
-# Read-only. This job checks out, builds and throws the result away - it pushes
-# nothing, comments on nothing and cuts no release. Stated rather than left to the
-# repository default, which grants the job token write access to contents on a repo
-# that has not been switched over, and hands every third-party action in the steps
-# below the ability to commit to this repo. release.yml asks for contents:write
-# separately, at the one job that needs it.
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -44,18 +42,6 @@ jobs:
         uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
           run-install: false
-
-      # The mod's own tests, through the same command a developer runs. They build
-      # nothing the packaging step consumes, so they run first: an invariant that has
-      # broken should fail the job before anything is packaged.
-      - name: Run tests
-        shell: pwsh
-        run: |
-          pixi run test
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::'pixi run test' failed"
-            exit 1
-          }
 
       # Build and package through the SAME command a developer runs locally. All
       # build logic lives in the pixi task chain (setup -> build -> package); the

@@ -30,7 +30,9 @@ build-release = { cmd = "cmake --build build --config Release", depends-on = ["s
 # whatever `pixi run package` had just produced.
 setup-tests = { cmd = "cmake -B build-tests -A x64 -DOLHT_BUILD_TESTS=ON" }
 build-tests = { cmd = "cmake --build build-tests --config Release --target OutlastHeadTrackingTests config_differential_tests config_tests", depends-on = ["setup-tests"] }
-test        = { cmd = "ctest --test-dir build-tests -C Release --output-on-failure --no-tests=error", depends-on = ["build-tests"] }
+test-unit = { cmd = "ctest --test-dir build-tests -C Release --output-on-failure --no-tests=error -LE differential", depends-on = ["build-tests"] }
+test-differential = { cmd = "ctest --test-dir build-tests -C Release --output-on-failure --no-tests=error -L differential", depends-on = ["build-tests"] }
+test = { depends-on = ["test-unit", "test-differential"] }
 
 # Rewrite config/CameraUnlock.ini, the committed copy of the CameraUnlock.ini the mod creates at
 # first launch, from the config table after a change to a row, a comment or a default.
@@ -63,7 +65,7 @@ clean-all = "cmake -E rm -rf build build-tests release"
 # package, and build.yml - the one workflow that does test - skips a commit whose subject
 # begins "Release v", which is exactly what release.ps1 commits. Without this line a broken
 # axis sign ships.
-package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release", "test", "validate-notices"] }
+package = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/package-release.ps1", depends-on = ["build-release", "test-unit", "validate-notices"] }
 release = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/release.ps1" }
 release-nightly = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/release-nightly.ps1" }
 

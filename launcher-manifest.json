@@ -1,0 +1,29 @@
+{
+  "schema_version": 2,
+  "mod_info": {
+    "name": "OutlastHeadTracking",
+    "version": "0.0.0",
+    "game_id": "outlast"
+  },
+  "strategy": "Shim",
+  "delivery_mode": "manifest",
+
+  "files": [
+    {
+      "source": "plugins/dinput8.dll",
+      "target": "Binaries/Win64/dinput8.dll",
+      "backup": true
+    }
+  ],
+
+  "config": {
+    "path": "Binaries/Win64/CameraUnlock.ini",
+    "anchor": "game_root",
+    "legacy_source": "Binaries/Win64/HeadTracking.ini",
+    "canonical_since": "0.1.0",
+    "per_game": {}
+  },
+
+  "runtime_requirements": [],
+  "dependencies": []
+}

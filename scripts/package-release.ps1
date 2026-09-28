@@ -4,7 +4,8 @@
 # Copyright (c) 2026 itsloopyo
 #
 # Builds two ZIPs in release/:
-#   OutlastHeadTracking-v<version>-installer.zip  GitHub Releases (install.cmd + payload)
+#   OutlastHeadTracking-v<version>-installer.zip  GitHub Releases and the launcher (install.cmd,
+#                                                 launcher-manifest.json + payload)
 #   OutlastHeadTracking-v<version>-nexus.zip      drop-in, extracted over the game folder
 #
 # Runs unattended: no prompts, exit 0 on success, non-zero with a one-line
@@ -101,6 +102,14 @@ Copy-SharedBundle -StagingDir $instStaging
 
 Copy-Item -LiteralPath $installCmdPath -Destination $instStaging -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts\uninstall.cmd') -Destination $instStaging -Force
+
+# The launcher deploys natively from launcher-manifest.json at the ZIP root, stamped with
+# the version the DLL was built as. BOM-less, since PS 5.1's Set-Content -Encoding utf8
+# writes a BOM.
+$manifest = Get-Content -LiteralPath (Join-Path $projectRoot 'launcher-manifest.json') -Raw | ConvertFrom-Json
+$manifest.mod_info.version = $version
+[IO.File]::WriteAllText((Join-Path $instStaging 'launcher-manifest.json'), ($manifest | ConvertTo-Json -Depth 10),
+    (New-Object System.Text.UTF8Encoding $false))
 
 foreach ($doc in 'README.md', 'LICENSE', 'CHANGELOG.md', 'THIRD-PARTY-NOTICES.md') {
     Copy-Item -LiteralPath (Join-Path $projectRoot $doc) -Destination $instStaging -Force

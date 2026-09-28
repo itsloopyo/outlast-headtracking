@@ -71,11 +71,8 @@ release-nightly = { cmd = "powershell -ExecutionPolicy Bypass -File scripts/rele
 # have its licence text reproduced in THIRD-PARTY-NOTICES.md, not merely named.
 validate-notices = "node cameraunlock-core/scripts/validate-notices.mjs ."
 
-# A documented no-op, not an omission. The launcher package contract is a
-# launcher-manifest.json at the release ZIP root, and this mod does not carry one yet
-# because lopari does not list it - core's validate-manifest.mjs has nothing to read until
-# it does. The task exists so the fleet's task set is the same everywhere, and so that
-# adding the manifest is a one-line change here rather than a missing gate nobody notices.
-validate-manifest = "powershell -NoProfile -Command \"Write-Host 'No launcher-manifest.json: this mod is not in the lopari catalogue yet. Add the manifest and point this task at cameraunlock-core/scripts/validate-manifest.mjs when it is.'\""
+# Checks the newest installer and Nexus ZIPs in release/ against core's manifest and config
+# descriptor rules. Run it after `pixi run package`.
+validate-manifest = "node cameraunlock-core/scripts/validate-manifest.mjs"
 
 [dependencies]

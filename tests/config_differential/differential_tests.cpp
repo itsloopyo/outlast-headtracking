@@ -17,9 +17,11 @@
 // starts on and the actions every key press fires are the import's, apart from normalisation
 // N3, which the import must record as dropped: a hotkey code on Ctrl, Shift or Alt alone imports
 // as unbound, and the action keeps its Ctrl+Shift chord where the chord switch was on. The
-// frozen reader already kept every code inside 0x00-0xFE, so N1 never applies. A value the
-// canonical row cannot hold has no approved rule, so the owner defers that import and the
-// session runs on what the import gave (kUnrepresentable).
+// frozen reader already kept every code inside 0x00-0xFE, so N1 never applies. It read the five
+// [Position] limits with no upper bound, and N4 brings one above the canonical rows' 10 metres
+// to 10, which the import must record as NumberOutOfRange with the value read. It replaced every
+// float that is not finite, so N2 never applies. The dev build shipped once, so an untouched
+// setting is compared with the one set of defaults it shipped.
 //
 // A setting the player never changed from what the published build shipped follows Defaults.ini:
 // the import lists its row in follows_defaults_ini, the tracking mode pair as one unit, and the
@@ -83,14 +85,10 @@ using namespace OutlastHeadTracking;
 namespace {
 
 // The published build read the five [Position] limits with no upper bound, and the canonical
-// rows take 0 to 10 metres. Core has no rule for a value outside a concept's range, so the owner
-// defers such a file: it stays as it is, the session runs on what the import read, and nothing
-// is saved.
-const char* const kUnrepresentable =
-    "[Position] LimitX, LimitY, LimitYDown, LimitZ or LimitZBack above 10, which the canonical rows cannot hold, "
-    "so the import defers";
-
+// rows take 0 to 10 metres.
 constexpr float kMaxCanonicalLimit = 10.0f;
+
+float AfterN4(float limit) { return limit > kMaxCanonicalLimit ? kMaxCanonicalLimit : limit; }
 
 constexpr const char* kFileName = kLegacyConfigFileName;
 
@@ -522,7 +520,6 @@ struct Tally {
     struct Run {
         int created = 0;
         int imported = 0;
-        int deferred = 0;
         int refused = 0;
         // Migrated files holding at least one default row.
         int with_default_rows = 0;
@@ -530,6 +527,7 @@ struct Tally {
         int with_values = 0;
     } builtin, altered;
     int with_key_dropped = 0;
+    int with_limit_clamped = 0;
     // Inputs where the player changed at least one row, and where they changed the tracking mode.
     int touched = 0;
     int mode_touched = 0;
@@ -546,10 +544,10 @@ outlast_oracle_view::HotkeyView KeysAfterN3(const legacy::Config& l) {
     return keys;
 }
 
-// Each hotkey is dropped as ModifierKey exactly where its code is Ctrl, Shift or Alt alone, and
-// nothing is dropped by any other rule: the frozen reader keeps every code inside 0x00-0xFE,
-// so N1 never applies, and the published build read no pose shaping, reticle, aim or pivot
-// setting.
+// Each hotkey is dropped as ModifierKey exactly where its code is Ctrl, Shift or Alt alone, each
+// limit as NumberOutOfRange exactly where it is above 10 metres, and nothing is dropped by any
+// other rule: the frozen reader keeps every code inside 0x00-0xFE, so N1 never applies, and the
+// published build read no pose shaping, reticle, aim or pivot setting.
 void CheckDrops(const std::string& name, const legacy::Config& l, const ImportResult& imported, Tally& tally) {
     const std::pair<const char*, int> keys[] = {
         {"Toggle", l.vk_toggle}, {"CycleMode", l.vk_cycle_mode}, {"YawMode", l.vk_yaw_mode}};
@@ -560,9 +558,26 @@ void CheckDrops(const std::string& name, const legacy::Config& l, const ImportRe
         any = any || listed;
     }
     if (any) ++tally.with_key_dropped;
+    const std::pair<const char*, float> limits[] = {{"LimitX", l.pos_limit_x},
+                                                    {"LimitY", l.pos_limit_y},
+                                                    {"LimitYDown", l.pos_limit_y_down},
+                                                    {"LimitZ", l.pos_limit_z},
+                                                    {"LimitZBack", l.pos_limit_z_back}};
+    bool clamped = false;
+    for (const auto& [key, limit] : limits) {
+        const DroppedValue* drop = FindDrop(imported.dropped, DropRule::NumberOutOfRange, "Position", key);
+        Check((drop != nullptr) == (limit > kMaxCanonicalLimit),
+              name + ": [Position] " + key + " dropped as out of range does not match its value");
+        if (drop != nullptr) {
+            Check(std::stof(drop->value) == limit, name + ": [Position] " + key + " is recorded as " + drop->value +
+                                                       ", not the value read");
+        }
+        clamped = clamped || drop != nullptr;
+    }
+    if (clamped) ++tally.with_limit_clamped;
     Check(imported.pose_shaping.empty(), name + ": the import lists pose shaping the published build never read");
     for (const DroppedValue& d : imported.dropped) {
-        Check(d.rule == DropRule::ModifierKey,
+        Check(d.rule == DropRule::ModifierKey || d.rule == DropRule::NumberOutOfRange,
               name + ": the import drops [" + d.section + "] " + d.key + " by a rule this map never applies");
     }
 }
@@ -626,8 +641,8 @@ std::string Names(const ConceptSet& rows) {
 }
 
 // The settings the mod starts on after the migration against the ones the frozen reader's build
-// started on, with N3 applied (CheckDrops holds the import to recording it). A row in `follows`
-// runs on `d`, what Defaults.ini gives, instead of the legacy value.
+// started on, with N3 and N4 applied (CheckDrops holds the import to recording them). A row in
+// `follows` runs on `d`, what Defaults.ini gives, instead of the legacy value.
 std::vector<std::string> StartupDifferences(const legacy::Config& l, const Config& m, const ConceptSet& follows,
                                             const Config& d) {
     std::vector<std::string> diff;
@@ -658,12 +673,12 @@ std::vector<std::string> StartupDifferences(const legacy::Config& l, const Confi
     number(Concept::RemoteSmoothing, m.remote_smoothing, l.remote_smoothing, d.remote_smoothing, "RemoteSmoothing");
     number(Concept::RemoteSmoothing, m.position.remote_smoothing, l.remote_smoothing, d.position.remote_smoothing,
            "RemoteSmoothing (position)");
-    number(Concept::PositionLimitX, m.position.limit_x, l.pos_limit_x, d.position.limit_x, "PositionLimitX");
-    number(Concept::PositionLimitY, m.position.limit_y, l.pos_limit_y, d.position.limit_y, "PositionLimitY");
-    number(Concept::PositionLimitYDown, m.position.limit_y_down, l.pos_limit_y_down, d.position.limit_y_down,
+    number(Concept::PositionLimitX, m.position.limit_x, AfterN4(l.pos_limit_x), d.position.limit_x, "PositionLimitX");
+    number(Concept::PositionLimitY, m.position.limit_y, AfterN4(l.pos_limit_y), d.position.limit_y, "PositionLimitY");
+    number(Concept::PositionLimitYDown, m.position.limit_y_down, AfterN4(l.pos_limit_y_down), d.position.limit_y_down,
            "PositionLimitYDown");
-    number(Concept::PositionLimitZ, m.position.limit_z, l.pos_limit_z, d.position.limit_z, "PositionLimitZ");
-    number(Concept::PositionLimitZBack, m.position.limit_z_back, l.pos_limit_z_back, d.position.limit_z_back,
+    number(Concept::PositionLimitZ, m.position.limit_z, AfterN4(l.pos_limit_z), d.position.limit_z, "PositionLimitZ");
+    number(Concept::PositionLimitZBack, m.position.limit_z_back, AfterN4(l.pos_limit_z_back), d.position.limit_z_back,
            "PositionLimitZBack");
     flag(Concept::CollisionEnabled, m.collision_enabled, l.collision_enabled, d.collision_enabled, "CollisionEnabled");
     number(Concept::CollisionReleaseSmoothing, m.lean_clamp.release_smoothing, l.collision_release_smoothing,
@@ -691,7 +706,7 @@ std::vector<std::string> StartupDifferences(const legacy::Config& l, const Confi
     return diff;
 }
 
-bool Unrepresentable(const legacy::Config& l) {
+bool AboveCanonicalLimit(const legacy::Config& l) {
     return l.pos_limit_x > kMaxCanonicalLimit || l.pos_limit_y > kMaxCanonicalLimit ||
            l.pos_limit_y_down > kMaxCanonicalLimit || l.pos_limit_z > kMaxCanonicalLimit ||
            l.pos_limit_z_back > kMaxCanonicalLimit;
@@ -762,22 +777,12 @@ void Comparison2(Scratch& scratch, const Input& input, const ImportRun& import, 
         if (!untouched.count(Concept::PositionEnabled)) ++tally.mode_touched;
     }
 
-    // Imported or deferred, the session runs on the settings the load hands back: Defaults.ini's
-    // on each row the player never changed, the import's on the rest.
+    // The session runs on the settings the load hands back: Defaults.ini's on each row the player
+    // never changed, the import's on the rest.
     {
         const std::vector<std::string> d =
             StartupDifferences(import.config, loaded.config, follows, builtin ? g_builtinConfig : g_alteredConfig);
         Check(d.empty(), name + ": comparison 2: " + Join(d));
-    }
-
-    if (Unrepresentable(import.config)) {
-        ++run.deferred;
-        Check(loaded.status == ConfigLoadStatus::Deferred,
-              name + ": " + kUnrepresentable + ", but the load is " + cfg::ConfigLoadStatusName(loaded.status));
-        Check(after.files == Files{{kFileName, *input.bytes}}, name + ": a deferred import created CameraUnlock.ini or another file");
-        Check(loaded.reason.find("cannot be converted") != std::string::npos,
-              name + ": the player is not told which value stops the import: " + loaded.reason);
-        return;
     }
 
     ++run.imported;
@@ -788,6 +793,8 @@ void Comparison2(Scratch& scratch, const Input& input, const ImportRun& import, 
               after.files[1].second == *input.bytes,
           name + ": the folder does not hold HeadTracking.ini and CameraUnlock.ini and nothing else");
     Check(Contains(loaded.log, "created from"), name + ": the log does not say where CameraUnlock.ini came from");
+    Check(!AboveCanonicalLimit(import.config) || Contains(loaded.log, "outside the range this setting takes"),
+          name + ": the log does not say a limit above 10 metres imports as 10");
     const std::string migrated = ReadBytes(config);
     tally.migrated.insert(migrated);
     for (const Concept row : follows) {
@@ -952,17 +959,16 @@ int main(int argc, char** argv) {
         for (const auto& [over, run] : {std::pair<const char*, const Tally::Run*>{"at the built-in values", &tally.builtin},
                                         std::pair<const char*, const Tally::Run*>{"changed", &tally.altered}}) {
             std::printf("  over Defaults.ini %s: %d created, %d imported (%d holding a default row, %d a value), "
-                        "%d deferred, %d refused as dev refused them\n",
-                        over, run->created, run->imported, run->with_default_rows, run->with_values, run->deferred,
-                        run->refused);
-            Check(run->deferred > 0, std::string("no input is deferred over ") + over);
+                        "%d refused as dev refused them\n",
+                        over, run->created, run->imported, run->with_default_rows, run->with_values, run->refused);
             Check(run->refused > 0, std::string("no input is refused over ") + over);
             Check(run->with_default_rows > 0, std::string("no import writes default over ") + over);
             Check(run->with_values > 0, std::string("no import writes a value over ") + over);
         }
         std::printf("  %d with a hotkey on Ctrl, Shift or Alt alone unbound (N3)\n", tally.with_key_dropped);
-        std::printf("  deferred: %s\n", kUnrepresentable);
+        std::printf("  %d with a [Position] limit above 10 metres imported as 10 (N4)\n", tally.with_limit_clamped);
         Check(tally.with_key_dropped > 0, "no input binds a hotkey to a modifier alone");
+        Check(tally.with_limit_clamped > 0, "no input sets a limit above 10 metres");
         std::printf("  %d with a row the player changed, %d of them the tracking mode\n", tally.touched,
                     tally.mode_touched);
         Check(tally.touched > 0 && tally.mode_touched > 0, "no input changes a row, or none the tracking mode");

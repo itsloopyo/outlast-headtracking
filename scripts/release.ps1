@@ -51,21 +51,6 @@ $changelogPath  = Join-Path $projectRoot 'CHANGELOG.md'
 
 Import-Module (Join-Path $projectRoot 'cameraunlock-core\powershell\ReleaseWorkflow.psm1') -Force
 
-# Mirrors New-ChangelogFromCommits' insertion so a -Force maintenance entry lands
-# in the same place with the same shape.
-function Add-MaintenanceChangelogEntry {
-    param([string]$Path, [string]$NewVersion)
-    $date  = Get-Date -Format 'yyyy-MM-dd'
-    $entry = "## [$NewVersion] - $date`n`n### Changed`n`n- Maintenance release (no user-facing changes).`n`n"
-    $changelog = Get-Content -LiteralPath $Path -Raw
-    if ($changelog -match '(?s)(# Changelog.*?)(## \[)') {
-        $changelog = $changelog -replace '(?s)(# Changelog.*?\n\n)', "`$1$entry"
-    } else {
-        $changelog = $changelog -replace '(?s)(# Changelog.*?\n)', "`$1$entry"
-    }
-    Set-Content -LiteralPath $Path -Value ($changelog.TrimEnd() + "`n") -NoNewline
-}
-
 Write-Host ''
 Write-Host '=== Outlast Head Tracking Release ===' -ForegroundColor Cyan
 Write-Host ''
@@ -147,22 +132,13 @@ if ($LASTEXITCODE -ne 0) {
 # abort (all commits filtered as noise), and aborting here leaves the working
 # tree clean instead of stranding a half-applied version bump with no tag.
 Write-Host 'Generating CHANGELOG from commits...' -ForegroundColor Cyan
-$hasTags = & git -C $projectRoot tag -l
-if (-not $hasTags) {
-    $date = Get-Date -Format 'yyyy-MM-dd'
-    Set-Content -LiteralPath $changelogPath -NoNewline -Value "# Changelog`n`n## [$Version] - $date`n`nFirst release.`n"
-} else {
-    try {
-        New-ChangelogFromCommits -ChangelogPath $changelogPath -Version $Version -ArtifactPaths @('src/', 'cameraunlock-core', 'scripts/', 'CMakeLists.txt') | Out-Null
-    } catch {
-        if (-not $Force) {
-            Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host 'No user-facing changes to release. Re-run with -Force for a maintenance release.' -ForegroundColor Yellow
-            exit 1
-        }
-        Write-Host 'No user-facing commits since last tag - writing maintenance entry (-Force).' -ForegroundColor Yellow
-        Add-MaintenanceChangelogEntry -Path $changelogPath -NewVersion $Version
-    }
+try {
+    New-ChangelogFromCommits -ChangelogPath $changelogPath -Version $Version `
+        -ArtifactPaths @('src/', 'cameraunlock-core', 'scripts/', 'CMakeLists.txt') -Maintenance:$Force | Out-Null
+} catch {
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host 'No user-facing changes to release. Re-run with -Force for a maintenance release.' -ForegroundColor Yellow
+    exit 1
 }
 
 # --- Step 5: bump the three copies of the version ---------------------------
